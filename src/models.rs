@@ -85,6 +85,9 @@ pub struct StatsResp {
     pub days_together: i64,
     pub next_anniversary: Option<Anniversary>,
     pub love_start: String,
+    pub entry_count: i64,
+    pub photo_count: i64,
+    pub comment_count: i64,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]

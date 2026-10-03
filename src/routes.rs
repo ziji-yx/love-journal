@@ -24,6 +24,7 @@ pub const MAX_UPLOAD_BODY_BYTES: usize = (MAX_PHOTO_BYTES + 1024 * 1024) * MAX_P
 pub struct EntriesQuery {
     pub from: Option<String>,
     pub to: Option<String>,
+    pub q: Option<String>,
 }
 
 struct PendingPhoto {
@@ -188,10 +189,23 @@ pub async fn stats(
     let today = chrono::Local::now().date_naive();
     let days_together = (today - state.love_start).num_days().max(0);
 
+    let entry_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries")
+        .fetch_one(&state.db)
+        .await?;
+    let photo_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM photos")
+        .fetch_one(&state.db)
+        .await?;
+    let comment_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM comments")
+        .fetch_one(&state.db)
+        .await?;
+
     Ok(Json(StatsResp {
         days_together,
         next_anniversary: next_anniversary(today, state.love_start),
         love_start: state.love_start.format("%Y-%m-%d").to_string(),
+        entry_count,
+        photo_count,
+        comment_count,
     }))
 }
 
@@ -236,6 +250,20 @@ pub async fn list_entries(
     if query.to.is_some() {
         conditions.push("date <= ?");
     }
+    let search = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(value) = search {
+        if value.chars().count() > 100 {
+            return Err(AppError::BadRequest("搜索内容不能超过 100 个字符".into()));
+        }
+    }
+    let search_pattern = search.map(|value| format!("%{value}%"));
+    if search_pattern.is_some() {
+        conditions.push("(note LIKE ? OR date LIKE ? OR author LIKE ?)");
+    }
     if !conditions.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&conditions.join(" AND "));
@@ -248,6 +276,9 @@ pub async fn list_entries(
     }
     if let Some(to) = &query.to {
         db_query = db_query.bind(to);
+    }
+    if let Some(pattern) = &search_pattern {
+        db_query = db_query.bind(pattern).bind(pattern).bind(pattern);
     }
 
     let entries = db_query.fetch_all(&state.db).await?;
@@ -649,6 +680,24 @@ pub async fn create_comment(
     .await?;
 
     Ok(Json(comment))
+}
+pub async fn delete_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+
+    let result = sqlx::query("DELETE FROM comments WHERE id = ?")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[cfg(test)]

@@ -140,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/entries/:id/comments",
             get(routes::list_comments).post(routes::create_comment),
         )
+        .route("/api/comments/:id", delete(routes::delete_comment))
         .route("/uploads/:filename", get(routes::serve_upload))
         .fallback_service(ServeDir::new("static").fallback(ServeFile::new("static/index.html")))
         .layer(SetResponseHeaderLayer::overriding(

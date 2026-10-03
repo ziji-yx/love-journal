@@ -17,6 +17,8 @@ const appView = document.querySelector("#app");
 const loginForm = document.querySelector("#login-form");
 const passwordInput = document.querySelector("#password");
 const loginError = document.querySelector("#login-err");
+const searchForm = document.querySelector("#search-form");
+const searchInput = document.querySelector("#search-input");
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => {
@@ -76,13 +78,16 @@ function authorBadge(author) {
 }
 function commentTemplate(comment) {
   return `
-    <div class="comment">
+    <div class="comment" data-comment-id="${comment.id}">
       <div class="sticker">${esc(comment.sticker || "💬")}</div>
-      <div>
-        <span class="who">${authorLabel(comment.author)}</span>
-        <span class="when">${formatDateTime(comment.created_at)}</span>
-        <div>${esc(comment.content)}</div>
+      <div class="comment-body">
+        <div class="comment-head">
+          <span class="who">${authorLabel(comment.author)}</span>
+          <span class="when">${formatDateTime(comment.created_at)}</span>
+        </div>
+        <div class="comment-text">${esc(comment.content)}</div>
       </div>
+      <button class="comment-del" type="button" data-comment-delete="${comment.id}" title="删除留言">×</button>
     </div>
   `;
 }
@@ -244,6 +249,10 @@ function render() {
     renderTimeline().finally(updateLinks);
   } else if (route === "/calendar") {
     renderCalendar().finally(updateLinks);
+  } else if (/^\/search(?:\/.*)?$/.test(route)) {
+    const query = decodeURIComponent(route.slice("/search/".length) || "");
+    searchInput.value = query;
+    renderSearch(query).finally(updateLinks);
   } else if (route === "/new") {
     renderEntryForm();
     updateLinks();
@@ -306,6 +315,11 @@ async function renderHome() {
         </div>
         <div class="entry-list">${recentHtml}</div>
       </section>
+      <div class="stat-strip">
+        <div class="stat-item"><strong>${Number(stats.entry_count)}</strong><span>手账</span></div>
+        <div class="stat-item"><strong>${Number(stats.photo_count)}</strong><span>照片</span></div>
+        <div class="stat-item"><strong>${Number(stats.comment_count)}</strong><span>留言</span></div>
+      </div>
     `;
 
     document.querySelector("#random-entry").addEventListener("click", handleRandomEntry);
@@ -364,6 +378,26 @@ async function renderTimeline() {
       .join("");
   } catch (error) {
     view.innerHTML = emptyState(error.message || "时间轴加载失败");
+  }
+}
+async function renderSearch(query) {
+  view.innerHTML = '<div class="loading">正在翻找这些记忆…</div>';
+  const keyword = (query || "").trim();
+  try {
+    const entries = keyword
+      ? await api(`/api/entries?q=${encodeURIComponent(keyword)}`)
+      : [];
+    const count = entries.length;
+    view.innerHTML = `
+      <div class="section-title">
+        <h2>搜索结果</h2>
+        <span class="result-count">${count} 条</span>
+      </div>
+      <p class="search-keyword">关键词：${esc(keyword || "空")}</p>
+      <div class="entry-list">${count ? entries.map((entry) => renderEntryCard(entry)).join("") : emptyState("没有找到相关手账")}</div>
+    `;
+  } catch (error) {
+    view.innerHTML = emptyState(error.message || "搜索失败");
   }
 }
 
@@ -758,6 +792,17 @@ async function handleCommentSubmit(id, event) {
     button.textContent = "留言";
   }
 }
+async function handleCommentDelete(commentId) {
+  if (!window.confirm("确定删除这条留言吗？")) return;
+  try {
+    await api(`/api/comments/${encodeURIComponent(commentId)}`, { method: "DELETE" });
+    const item = document.querySelector(`[data-comment-id="${commentId}"]`);
+    if (item) item.remove();
+    toast("留言已删除", "success");
+  } catch (error) {
+    toast(error.message || "删除失败");
+  }
+}
 
 function openLightbox(url) {
   const lightbox = document.querySelector("#lightbox");
@@ -781,6 +826,12 @@ view.addEventListener("click", (event) => {
     return;
   }
 
+  const commentDelete = event.target.closest("[data-comment-delete]");
+  if (commentDelete) {
+    handleCommentDelete(commentDelete.dataset.commentDelete);
+    return;
+  }
+
   const entryCard = event.target.closest("[data-entry-id]");
   if (entryCard) {
     const interactive = event.target.closest("a, button, input, select, textarea");
@@ -792,6 +843,11 @@ view.addEventListener("click", (event) => {
 
 document.querySelector("#lightbox").addEventListener("click", closeLightbox);
 document.querySelector("#logout").addEventListener("click", handleLogout);
+searchForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const keyword = searchInput.value.trim();
+  navigate(`#/search/${encodeURIComponent(keyword)}`);
+});
 loginForm.addEventListener("submit", handleLogin);
 window.addEventListener("hashchange", render);
 window.addEventListener("keydown", (event) => {
