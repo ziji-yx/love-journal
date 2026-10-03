@@ -21,6 +21,7 @@ pub struct Photo {
     pub original_name: String,
     pub mime: String,
     pub created_at: String,
+    pub caption: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -30,6 +31,15 @@ pub struct Comment {
     pub author: String,
     pub content: String,
     pub sticker: String,
+    pub created_at: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Milestone {
+    pub id: i64,
+    pub name: String,
+    pub date: String,
+    pub emoji: String,
+    pub repeat_yearly: i64,
     pub created_at: String,
 }
 
@@ -78,6 +88,24 @@ pub struct CreateCommentReq {
     pub author: String,
     pub content: String,
     pub sticker: String,
+}
+#[derive(Debug, Deserialize)]
+pub struct UpdatePhotoReq {
+    pub caption: String,
+}
+#[derive(Debug, Deserialize)]
+pub struct CreateMilestoneReq {
+    pub name: String,
+    pub date: String,
+    pub emoji: String,
+    pub repeat_yearly: i64,
+}
+#[derive(Debug, Deserialize)]
+pub struct UpdateMilestoneReq {
+    pub name: String,
+    pub date: String,
+    pub emoji: String,
+    pub repeat_yearly: i64,
 }
 
 #[derive(Debug, Serialize)]

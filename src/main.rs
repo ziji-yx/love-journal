@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use axum::{
     extract::DefaultBodyLimit,
     http::header::{HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use sqlx::SqlitePool;
@@ -135,7 +135,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/entries/:id/photos",
             post(routes::upload_photos).layer(DefaultBodyLimit::max(routes::MAX_UPLOAD_BODY_BYTES)),
         )
-        .route("/api/photos/:id", delete(routes::delete_photo))
+        .route(
+            "/api/photos/:id",
+            delete(routes::delete_photo).put(routes::update_photo_caption),
+        )
+        .route(
+            "/api/milestones",
+            get(routes::list_milestones).post(routes::create_milestone),
+        )
+        .route(
+            "/api/milestones/:id",
+            put(routes::update_milestone).delete(routes::delete_milestone),
+        )
         .route(
             "/api/entries/:id/comments",
             get(routes::list_comments).post(routes::create_comment),

@@ -1,6 +1,7 @@
 "use strict";
 
 const TOKEN_KEY = "love_journal_token";
+const THEME_KEY = "love_journal_theme";
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
 };
@@ -19,6 +20,7 @@ const passwordInput = document.querySelector("#password");
 const loginError = document.querySelector("#login-err");
 const searchForm = document.querySelector("#search-form");
 const searchInput = document.querySelector("#search-input");
+const themeToggle = document.querySelector("#theme-toggle");
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => {
@@ -74,7 +76,8 @@ function photoThumb(entry) {
 }
 
 function authorBadge(author) {
-  return `<span class="author">${authorLabel(author)}</span>`;
+  const kind = author === "her" ? "her" : "me";
+  return `<span class="author author-${kind}">${authorLabel(author)}</span>`;
 }
 function commentTemplate(comment) {
   return `
@@ -95,7 +98,7 @@ function commentTemplate(comment) {
 function renderEntryCard(entry, compact = false) {
   const note = esc(entry.note || "");
   return `
-    <article class="entry${compact ? " compact" : ""}" data-entry-id="${entry.id}">
+    <article class="entry entry-${entry.author === "her" ? "her" : "me"}${compact ? " compact" : ""}" data-entry-id="${entry.id}">
       <div class="thumb">${photoThumb(entry)}</div>
       <div>
         <div class="meta">${formatDate(entry.date)}</div>
@@ -117,6 +120,15 @@ function setAuth(token) {
   } else {
     localStorage.removeItem(TOKEN_KEY);
   }
+}
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem(THEME_KEY, theme);
+  if (themeToggle) themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+}
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
 }
 
 async function api(path, options = {}) {
@@ -249,6 +261,8 @@ function render() {
     renderTimeline().finally(updateLinks);
   } else if (route === "/calendar") {
     renderCalendar().finally(updateLinks);
+  } else if (route === "/milestones") {
+    renderMilestonesPage().finally(updateLinks);
   } else if (/^\/search(?:\/.*)?$/.test(route)) {
     const query = decodeURIComponent(route.slice("/search/".length) || "");
     searchInput.value = query;
@@ -273,11 +287,58 @@ function render() {
 }
 
 async function renderHome() {
+function nextMilestoneDate(date, repeatYearly) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || "");
+  if (!match) return null;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  let candidate = new Date(currentYear, month - 1, day);
+  if (candidate < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
+    candidate = new Date(currentYear + 1, month - 1, day);
+  }
+  if (!repeatYearly) {
+    const original = new Date(`${date}T00:00:00`);
+    candidate = original;
+  }
+  return candidate;
+}
+function milestoneCountdown(milestones) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return milestones
+    .map((milestone) => {
+      const next = nextMilestoneDate(milestone.date, milestone.repeat_yearly);
+      return { ...milestone, nextDate: next };
+    })
+    .filter((item) => item.nextDate)
+    .sort((a, b) => a.nextDate - b.nextDate);
+}
+function milestoneCard(milestone) {
+  const next = milestone.nextDate || new Date(`${milestone.date}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.max(0, Math.ceil((next - today) / 86400000));
+  const emoji = esc(milestone.emoji || "📅");
+  return `
+    <article class="milestone-card" data-milestone-id="${milestone.id}">
+      <div class="milestone-emoji">${emoji}</div>
+      <button class="milestone-del" type="button" data-milestone-delete="${milestone.id}" title="删除纪念日">×</button>
+      <div class="milestone-main">
+        <strong>${esc(milestone.name)}</strong>
+        <span>${formatDate(next.toISOString().slice(0, 10))}</span>
+      </div>
+      <div class="milestone-days">${days}<small>天</small></div>
+    </article>
+  `;
+}
   view.innerHTML = '<div class="loading">正在整理我们的回忆…</div>';
   try {
-    const [stats, entries] = await Promise.all([
+    const [stats, entries, milestones] = await Promise.all([
       api("/api/stats"),
       api("/api/entries"),
+      api("/api/milestones"),
     ]);
 
     const nextAnniversary = stats.next_anniversary
@@ -290,35 +351,51 @@ async function renderHome() {
       : '<p class="anniv">往后每一天，都值得纪念</p>';
 
     const latest = entries.slice(0, 5);
+    const upcomingMilestones = milestoneCountdown(milestones).slice(0, 3);
+    const milestoneHtml = upcomingMilestones.length
+      ? upcomingMilestones.map(milestoneCard).join("")
+      : '<a class="milestone-empty" href="#/milestones">还没有自定义纪念日，去添加第一个吧</a>';
     const recentHtml = latest.length
       ? latest.map((entry) => renderEntryCard(entry)).join("")
       : emptyState("还没有手账，从第一篇开始吧");
 
     view.innerHTML = `
-      <section class="hero">
-        <article class="card">
-          <div class="label">我们在一起</div>
-          <div class="days">${Number(stats.days_together)}</div>
-          <div class="label">天</div>
-          <p class="anniv">从 ${formatDate(stats.love_start)} 开始</p>
-        </article>
-        <article class="card">
-          <div class="label">下一个纪念日</div>
-          ${nextAnniversary}
-        </article>
-      </section>
-
-      <section>
-        <div class="section-title">
-          <h2>最近手账</h2>
-          <button id="random-entry" class="btn sm" type="button">随机回忆</button>
+      <div class="home-grid">
+        <div class="home-main">
+          <section class="hero">
+            <article class="card">
+              <div class="label">我们在一起</div>
+              <div class="days">${Number(stats.days_together)}</div>
+              <div class="label">天</div>
+              <p class="anniv">从 ${formatDate(stats.love_start)} 开始</p>
+            </article>
+            <article class="card">
+              <div class="label">下一个纪念日</div>
+              ${nextAnniversary}
+            </article>
+          </section>
+          <section>
+            <div class="section-title">
+              <h2>最近手账</h2>
+              <button id="random-entry" class="btn sm" type="button">随机回忆</button>
+            </div>
+            <div class="entry-list">${recentHtml}</div>
+          </section>
+          <div class="stat-strip">
+            <div class="stat-item stat-entries"><span class="stat-icon">📖</span><strong>${Number(stats.entry_count)}</strong><span>手账</span></div>
+            <div class="stat-item stat-photos"><span class="stat-icon">🖼️</span><strong>${Number(stats.photo_count)}</strong><span>照片</span></div>
+            <div class="stat-item stat-comments"><span class="stat-icon">💬</span><strong>${Number(stats.comment_count)}</strong><span>留言</span></div>
+          </div>
         </div>
-        <div class="entry-list">${recentHtml}</div>
-      </section>
-      <div class="stat-strip">
-        <div class="stat-item"><strong>${Number(stats.entry_count)}</strong><span>手账</span></div>
-        <div class="stat-item"><strong>${Number(stats.photo_count)}</strong><span>照片</span></div>
-        <div class="stat-item"><strong>${Number(stats.comment_count)}</strong><span>留言</span></div>
+        <aside class="home-aside">
+          <section>
+            <div class="section-title">
+              <h2>即将到来</h2>
+              <a class="btn ghost sm" href="#/milestones">全部纪念日</a>
+            </div>
+            <div class="milestone-grid">${milestoneHtml}</div>
+          </section>
+        </aside>
       </div>
     `;
 
@@ -402,6 +479,82 @@ async function renderSearch(query) {
 }
 
 function calendarMonthLabel(date) {
+async function renderMilestones() {
+  view.innerHTML = '<div class="loading">正在整理纪念日…</div>';
+  try {
+    const milestones = await api("/api/milestones");
+    const items = milestoneCountdown(milestones);
+    view.innerHTML = `
+      <div class="section-title">
+        <h2>我们的纪念日</h2>
+        <span class="result-count">${items.length} 个</span>
+      </div>
+      <form id="milestone-form" class="milestone-form card">
+        <input id="milestone-name" type="text" placeholder="例如：第一次见面" maxlength="40" required />
+        <input id="milestone-date" type="date" required />
+        <input id="milestone-emoji" type="text" placeholder="📅" maxlength="16" />
+        <label class="milestone-repeat"><input id="milestone-repeat" type="checkbox" checked /> 每年重复</label>
+        <button class="btn primary sm" type="submit">添加</button>
+      </form>
+      <div class="milestone-grid">${items.length ? items.map(milestoneCard).join("") : emptyState("还没有纪念日，添加一个值得记住的日子吧")}</div>
+    `;
+
+    document.querySelector("#milestone-form").addEventListener("submit", handleMilestoneCreate);
+    document.querySelectorAll("[data-milestone-id]").forEach((card) => {
+      card.addEventListener("click", () => handleMilestoneEdit(card.dataset.milestoneId, milestones));
+    });
+  } catch (error) {
+    view.innerHTML = emptyState(error.message || "纪念日加载失败");
+  }
+}
+
+async function handleMilestoneCreate(event) {
+  event.preventDefault();
+  const name = document.querySelector("#milestone-name").value.trim();
+  const date = document.querySelector("#milestone-date").value;
+  const emoji = document.querySelector("#milestone-emoji").value.trim();
+  const repeatYearly = document.querySelector("#milestone-repeat").checked ? 1 : 0;
+  if (!name || !date) return;
+  try {
+    await api("/api/milestones", {
+      method: "POST",
+      body: JSON.stringify({ name, date, emoji, repeat_yearly: repeatYearly }),
+    });
+    toast("纪念日已添加", "success");
+    await renderMilestones();
+  } catch (error) {
+    toast(error.message || "添加失败");
+  }
+}
+
+async function handleMilestoneEdit(id, milestones) {
+  const milestone = milestones.find((item) => String(item.id) === String(id));
+  if (!milestone) return;
+  const name = window.prompt("纪念日名称", milestone.name);
+  if (name === null) return;
+  const date = window.prompt("日期（YYYY-MM-DD）", milestone.date);
+  if (date === null) return;
+  try {
+    await api(`/api/milestones/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, date, emoji: milestone.emoji, repeat_yearly: milestone.repeat_yearly }),
+    });
+    toast("纪念日已更新", "success");
+    await renderMilestones();
+  } catch (error) {
+    toast(error.message || "更新失败");
+  }
+}
+async function handleMilestoneDelete(id) {
+  if (!window.confirm("确定删除这个纪念日吗？")) return;
+  try {
+    await api(`/api/milestones/${encodeURIComponent(id)}`, { method: "DELETE" });
+    toast("纪念日已删除", "success");
+    await renderMilestones();
+  } catch (error) {
+    toast(error.message || "删除失败");
+  }
+}
   return `${date.getFullYear()}年${date.getMonth() + 1}月`;
 }
 
@@ -439,7 +592,7 @@ async function renderCalendar() {
       const isToday = key === todayKey;
       days += `
         <div
-          class="day${has ? " has" : ""}${isToday ? " today" : ""}"
+          class="day${has ? " has entry-" + (entry.author === "her" ? "her" : "me") : ""}${isToday ? " today" : ""}"
           data-date="${key}"
           ${has ? `data-entry-id="${entry.id}"` : ""}
         >${day}</div>
@@ -605,6 +758,8 @@ async function renderEntryDetail(id) {
                 data-photo-url="${photoUrl(photo)}"
               />
               <button class="photo-del" type="button" title="删除照片" data-photo-delete="${photo.id}">×</button>
+              <div class="photo-caption">${esc(photo.caption || "")}</div>
+              <button class="caption-edit" type="button" data-photo-caption="${photo.id}">${photo.caption ? "编辑说明" : "写说明"}</button>
             </div>
           `,
         )
@@ -756,6 +911,23 @@ async function handlePhotoDelete(photoId) {
     toast(error.message || "删除失败");
   }
 }
+async function handlePhotoCaption(photoId) {
+  const current = document.querySelector(`[data-photo-caption="${photoId}"]`);
+  if (!current) return;
+  const caption = window.prompt("给这张照片写一句说明", current.closest(".photo-wrap").querySelector(".photo-caption").textContent);
+  if (caption === null) return;
+  try {
+    await api(`/api/photos/${encodeURIComponent(photoId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ caption }),
+    });
+    toast("照片说明已保存", "success");
+    const match = /^\/entry\/(\d+)$/.exec(currentRoute());
+    if (match) await renderEntryDetail(Number(match[1]));
+  } catch (error) {
+    toast(error.message || "保存失败");
+  }
+}
 
 async function handleCommentSubmit(id, event) {
   event.preventDefault();
@@ -820,6 +992,11 @@ function closeLightbox() {
 }
 
 view.addEventListener("click", (event) => {
+  const captionEdit = event.target.closest("[data-photo-caption]");
+  if (captionEdit) {
+    handlePhotoCaption(captionEdit.dataset.photoCaption);
+    return;
+  }
   const photo = event.target.closest("[data-photo-url]");
   if (photo) {
     openLightbox(photo.dataset.photoUrl);
@@ -832,6 +1009,11 @@ view.addEventListener("click", (event) => {
     return;
   }
 
+  const milestoneDelete = event.target.closest("[data-milestone-delete]");
+  if (milestoneDelete) {
+    handleMilestoneDeletePage(milestoneDelete.dataset.milestoneDelete);
+    return;
+  }
   const entryCard = event.target.closest("[data-entry-id]");
   if (entryCard) {
     const interactive = event.target.closest("a, button, input, select, textarea");
@@ -843,6 +1025,7 @@ view.addEventListener("click", (event) => {
 
 document.querySelector("#lightbox").addEventListener("click", closeLightbox);
 document.querySelector("#logout").addEventListener("click", handleLogout);
+themeToggle.addEventListener("click", toggleTheme);
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const keyword = searchInput.value.trim();
@@ -855,12 +1038,132 @@ window.addEventListener("keydown", (event) => {
 });
 
 async function boot() {
+function nextMilestoneDateGlobal(date, repeatYearly) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || "");
+  if (!match) return null;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  let candidate = new Date(currentYear, month - 1, day);
+  if (candidate < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
+    candidate = new Date(currentYear + 1, month - 1, day);
+  }
+  if (!repeatYearly) {
+    candidate = new Date(`${date}T00:00:00`);
+  }
+  return candidate;
+}
+function milestoneCountdownGlobal(milestones) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return milestones
+    .map((milestone) => ({ ...milestone, nextDate: nextMilestoneDateGlobal(milestone.date, milestone.repeat_yearly) }))
+    .filter((item) => item.nextDate)
+    .sort((a, b) => a.nextDate - b.nextDate);
+}
+function milestoneCardGlobal(milestone) {
+  const next = milestone.nextDate || new Date(`${milestone.date}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.max(0, Math.ceil((next - today) / 86400000));
+  const emoji = esc(milestone.emoji || "📅");
+  return `
+    <article class="milestone-card" data-milestone-id="${milestone.id}">
+      <div class="milestone-emoji">${emoji}</div>
+      <button class="milestone-del" type="button" data-milestone-delete="${milestone.id}" title="删除纪念日">×</button>
+      <div class="milestone-main">
+        <strong>${esc(milestone.name)}</strong>
+        <span>${formatDate(next.toISOString().slice(0, 10))}</span>
+      </div>
+      <div class="milestone-days">${days}<small>天</small></div>
+    </article>
+  `;
+}
+async function renderMilestonesPage() {
+  view.innerHTML = '<div class="loading">正在整理纪念日…</div>';
+  try {
+    const milestones = await api("/api/milestones");
+    const items = milestoneCountdownGlobal(milestones);
+    view.innerHTML = `
+      <div class="section-title">
+        <h2>我们的纪念日</h2>
+        <span class="result-count">${items.length} 个</span>
+      </div>
+      <form id="milestone-form" class="milestone-form card">
+        <input id="milestone-name" type="text" placeholder="例如：第一次见面" maxlength="40" required />
+        <input id="milestone-date" type="date" required />
+        <input id="milestone-emoji" type="text" placeholder="📅" maxlength="16" />
+        <label class="milestone-repeat"><input id="milestone-repeat" type="checkbox" checked /> 每年重复</label>
+        <button class="btn primary sm" type="submit">添加</button>
+      </form>
+      <div class="milestone-grid">${items.length ? items.map(milestoneCardGlobal).join("") : emptyState("还没有纪念日，添加一个值得记住的日子吧")}</div>
+    `;
+    document.querySelector("#milestone-form").addEventListener("submit", handleMilestoneCreatePage);
+    document.querySelectorAll("[data-milestone-id]").forEach((card) => {
+      card.addEventListener("click", () => handleMilestoneEditPage(card.dataset.milestoneId, milestones));
+    });
+  } catch (error) {
+    view.innerHTML = emptyState(error.message || "纪念日加载失败");
+  }
+}
+async function handleMilestoneCreatePage(event) {
+  event.preventDefault();
+  const name = document.querySelector("#milestone-name").value.trim();
+  const date = document.querySelector("#milestone-date").value;
+  const emoji = document.querySelector("#milestone-emoji").value.trim();
+  const repeatYearly = document.querySelector("#milestone-repeat").checked ? 1 : 0;
+  if (!name || !date) return;
+  try {
+    await api("/api/milestones", {
+      method: "POST",
+      body: JSON.stringify({ name, date, emoji, repeat_yearly: repeatYearly }),
+    });
+    toast("纪念日已添加", "success");
+    await renderMilestonesPage();
+  } catch (error) {
+    toast(error.message || "添加失败");
+  }
+}
+async function handleMilestoneEditPage(id, milestones) {
+  const milestone = milestones.find((item) => String(item.id) === String(id));
+  if (!milestone) return;
+  const name = window.prompt("纪念日名称", milestone.name);
+  if (name === null) return;
+  const date = window.prompt("日期（YYYY-MM-DD）", milestone.date);
+  if (date === null) return;
+  try {
+    await api(`/api/milestones/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, date, emoji: milestone.emoji, repeat_yearly: milestone.repeat_yearly }),
+    });
+    toast("纪念日已更新", "success");
+    await renderMilestonesPage();
+  } catch (error) {
+    toast(error.message || "更新失败");
+  }
+}
+async function handleMilestoneDeletePage(id) {
+  if (!window.confirm("确定删除这个纪念日吗？")) return;
+  try {
+    await api(`/api/milestones/${encodeURIComponent(id)}`, { method: "DELETE" });
+    toast("纪念日已删除", "success");
+    await renderMilestonesPage();
+  } catch (error) {
+    toast(error.message || "删除失败");
+  }
+}
+  const initialTheme = localStorage.getItem(THEME_KEY)
+    || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  applyTheme(initialTheme);
   if (!state.token) {
     showLogin();
     return;
   }
   try {
     await api("/api/me");
+    window.renderMilestonesPage = renderMilestonesPage;
+    window.handleMilestoneDeletePage = handleMilestoneDeletePage;
     showApp();
   } catch {
     showLogin();

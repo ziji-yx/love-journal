@@ -60,6 +60,12 @@ fn validate_update(req: &UpdateEntryReq) -> Result<(), AppError> {
     ensure_text("作者", &req.author, 1, 20)?;
     Ok(())
 }
+fn validate_milestone(name: &str, date: &str, emoji: &str) -> Result<(), AppError> {
+    ensure_text("名称", name, 1, 40)?;
+    parse_entry_date(date).map_err(AppError::BadRequest)?;
+    ensure_text("图标", emoji, 0, 16)?;
+    Ok(())
+}
 
 fn validate_range(query: &EntriesQuery) -> Result<(), AppError> {
     let from = query
@@ -620,6 +626,24 @@ pub async fn delete_photo(
     let _ = tokio::fs::remove_file(path).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
+pub async fn update_photo_caption(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdatePhotoReq>,
+) -> Result<Json<Photo>, AppError> {
+    auth::check(&state, &headers).await?;
+    ensure_text("照片说明", &req.caption, 0, 200)?;
+
+    let photo: Photo = sqlx::query_as("UPDATE photos SET caption = ? WHERE id = ? RETURNING *")
+        .bind(req.caption.trim())
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+    Ok(Json(photo))
+}
 
 pub async fn list_comments(
     State(state): State<AppState>,
@@ -700,6 +724,78 @@ pub async fn delete_comment(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+pub async fn list_milestones(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<Milestone>>, AppError> {
+    auth::check(&state, &headers).await?;
+    let milestones = sqlx::query_as::<_, Milestone>("SELECT * FROM milestones ORDER BY date, id")
+        .fetch_all(&state.db)
+        .await?;
+    Ok(Json(milestones))
+}
+
+pub async fn create_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateMilestoneReq>,
+) -> Result<Json<Milestone>, AppError> {
+    auth::check(&state, &headers).await?;
+    validate_milestone(&req.name, &req.date, &req.emoji)?;
+    let now = Utc::now().to_rfc3339();
+    let milestone: Milestone = sqlx::query_as(
+        "INSERT INTO milestones (name, date, emoji, repeat_yearly, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         RETURNING *",
+    )
+    .bind(req.name.trim())
+    .bind(&req.date)
+    .bind(req.emoji.trim())
+    .bind(req.repeat_yearly)
+    .bind(&now)
+    .fetch_one(&state.db)
+    .await?;
+    Ok(Json(milestone))
+}
+
+pub async fn update_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateMilestoneReq>,
+) -> Result<Json<Milestone>, AppError> {
+    auth::check(&state, &headers).await?;
+    validate_milestone(&req.name, &req.date, &req.emoji)?;
+    let milestone: Milestone = sqlx::query_as(
+        "UPDATE milestones SET name = ?, date = ?, emoji = ?, repeat_yearly = ?
+         WHERE id = ? RETURNING *",
+    )
+    .bind(req.name.trim())
+    .bind(&req.date)
+    .bind(req.emoji.trim())
+    .bind(req.repeat_yearly)
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    Ok(Json(milestone))
+}
+
+pub async fn delete_milestone(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+    let result = sqlx::query("DELETE FROM milestones WHERE id = ?")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
