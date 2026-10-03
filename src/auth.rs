@@ -84,15 +84,20 @@ pub async fn check(state: &AppState, headers: &HeaderMap) -> Result<(), AppError
     }
 }
 
-pub fn session_cookie(token: &str) -> HeaderValue {
+pub fn session_cookie(token: &str, secure: bool) -> HeaderValue {
+    let secure_attr = if secure { "; Secure" } else { "" };
     HeaderValue::from_str(&format!(
-        "{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL_SECONDS}"
+        "{SESSION_COOKIE}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_TTL_SECONDS}{secure_attr}"
     ))
     .expect("session token is always a valid cookie value")
 }
 
-pub fn clear_session_cookie() -> HeaderValue {
-    HeaderValue::from_static("love_journal_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0")
+pub fn clear_session_cookie(secure: bool) -> HeaderValue {
+    let secure_attr = if secure { "; Secure" } else { "" };
+    HeaderValue::from_str(&format!(
+        "love_journal_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{secure_attr}"
+    ))
+    .expect("clear session cookie is always valid")
 }
 
 pub fn extract_token(headers: &HeaderMap) -> Option<String> {
@@ -124,5 +129,16 @@ mod tests {
         assert!(constant_time_eq("secret", "secret"));
         assert!(!constant_time_eq("secret", "secre"));
         assert!(!constant_time_eq("secret", "other"));
+    }
+    #[test]
+    fn secure_cookie_flag_is_added_when_requested() {
+        assert!(session_cookie("token", true)
+            .to_str()
+            .unwrap()
+            .contains("Secure"));
+        assert!(!session_cookie("token", false)
+            .to_str()
+            .unwrap()
+            .contains("Secure"));
     }
 }

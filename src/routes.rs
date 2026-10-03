@@ -149,9 +149,10 @@ pub async fn login(
         token: token.clone(),
     })
     .into_response();
-    response
-        .headers_mut()
-        .insert(SET_COOKIE, auth::session_cookie(&token));
+    response.headers_mut().insert(
+        SET_COOKIE,
+        auth::session_cookie(&token, state.cookie_secure),
+    );
     Ok(response)
 }
 
@@ -163,7 +164,7 @@ pub async fn logout(
     let mut response = Json(serde_json::json!({ "ok": true })).into_response();
     response
         .headers_mut()
-        .insert(SET_COOKIE, auth::clear_session_cookie());
+        .insert(SET_COOKIE, auth::clear_session_cookie(state.cookie_secure));
     Ok(response)
 }
 
@@ -173,6 +174,9 @@ pub async fn me(
 ) -> Result<Json<serde_json::Value>, AppError> {
     auth::check(&state, &headers).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+pub async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true }))
 }
 
 pub async fn stats(

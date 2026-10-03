@@ -1,0 +1,36 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      DATABASE_URL: sqlite:///data/journal.db
+      UPLOAD_DIR: /data/uploads
+      COOKIE_SECURE: "true"
+    volumes:
+      - journal_data:/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    env_file:
+      - .env.production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  journal_data:
+  caddy_data:
+  caddy_config:

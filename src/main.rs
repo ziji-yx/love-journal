@@ -26,6 +26,7 @@ pub struct AppState {
     pub password: String,
     pub love_start: chrono::NaiveDate,
     pub upload_dir: PathBuf,
+    pub cookie_secure: bool,
 }
 fn find_project_root() -> PathBuf {
     let mut dir = std::env::current_exe()
@@ -59,6 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
     let is_loopback = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
+    let cookie_secure = std::env::var("COOKIE_SECURE")
+        .map(|value| !matches!(value.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+        .unwrap_or(!is_loopback);
     let password = std::env::var("APP_PASSWORD").map_err(|_| {
         "APP_PASSWORD 未设置：请先复制 .env.example 为 .env，并设置一个至少 8 位的口令"
     })?;
@@ -107,9 +111,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         password,
         love_start,
         upload_dir: upload_dir.clone(),
+        cookie_secure,
     };
 
     let app = Router::new()
+        .route("/healthz", get(routes::health))
         .route("/api/login", post(routes::login))
         .route("/api/logout", post(routes::logout))
         .route("/api/me", get(routes::me))

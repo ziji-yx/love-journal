@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.production.example
+data
+target
+Dockerfile
+docker-compose.yml
+compose.yaml
+Caddyfile
+*.md

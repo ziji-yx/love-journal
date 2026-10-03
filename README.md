@@ -14,7 +14,7 @@
 
 ## 环境要求
 
-- Rust 1.85 或更高版本
+- Rust 1.98 或更高版本
 
 安装依赖并首次启动只需要执行：
 
@@ -67,3 +67,33 @@ cargo clippy --all-targets --all-features
 ```
 
 修改端口后，访问地址中的端口也要同步修改。若启动失败，最常见的原因是端口被占用或 `.env` 中的日期格式不正确。
+
+## 线上部署
+
+项目已经带有 Docker 和 Caddy 配置，可以在有公网 IP 的服务器上运行，并自动申请 HTTPS 证书。
+
+1. 准备一个域名，例如 `love.example.com`。
+2. 在 DNS 服务商处添加一条 A 记录，把域名指向服务器 IP。
+3. 在服务器上复制并修改生产配置：
+
+```bash
+cp .env.production.example .env.production
+nano .env.production
+```
+
+至少修改 `DOMAIN`、`APP_PASSWORD` 和 `LOVE_START`。
+4. 启动服务：
+
+```bash
+docker compose --env-file .env.production up -d --build
+```
+
+5. 打开 `https://你的域名`。Caddy 会自动完成 HTTP 到 HTTPS 的跳转和证书续期。
+
+数据保存在 Docker 卷 `journal_data` 中。备份示例：
+
+```bash
+docker run --rm -v love-journal_journal_data:/data -v "$PWD/backup:/backup" alpine tar czf /backup/journal.tar.gz -C /data .
+```
+
+如果暂时没有服务器，也可以用 Cloudflare Tunnel 或 Tailscale 做私有访问；Docker 和 Caddy 方案适用于有域名和公网服务器的常规上线。
