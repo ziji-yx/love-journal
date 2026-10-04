@@ -263,6 +263,10 @@ function render() {
     renderCalendar().finally(updateLinks);
   } else if (route === "/milestones") {
     window.renderMilestonesPage().finally(updateLinks);
+  } else if (route === "/review") {
+    window.renderReviewPage().finally(updateLinks);
+  } else if (route === "/letters") {
+    window.renderLettersPage().finally(updateLinks);
   } else if (/^\/search(?:\/.*)?$/.test(route)) {
     const query = decodeURIComponent(route.slice("/search/".length) || "");
     searchInput.value = query;
@@ -822,6 +826,18 @@ async function renderEntryDetail(id) {
       <div class="photos">${photosHtml}</div>
     </section>
 
+    <section class="card voice-card">
+      <div class="section-title">
+        <h2>声音回忆</h2>
+        <span class="result-count">${(detail.voice_notes || []).length} 段</span>
+      </div>
+      <div id="voice-list" class="voice-list"></div>
+      <div class="voice-recorder">
+        <button id="voice-record" class="btn primary sm" type="button">开始录音</button>
+        <label class="upload-button">上传音频<input id="voice-file" type="file" accept="audio/*" hidden /></label>
+      </div>
+    </section>
+
     <section class="card">
       <div class="section-title">
         <h2>留言</h2>
@@ -858,6 +874,7 @@ async function renderEntryDetail(id) {
   document.querySelectorAll("[data-photo-url]").forEach((image) => {
     image.addEventListener("click", () => openLightbox(image.dataset.photoUrl));
   });
+  window.initVoiceSection(id, detail.voice_notes || []);
 }
 
 async function handleDeleteEntry(id) {

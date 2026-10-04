@@ -136,6 +136,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(routes::upload_photos).layer(DefaultBodyLimit::max(routes::MAX_UPLOAD_BODY_BYTES)),
         )
         .route(
+            "/api/entries/:id/voice",
+            post(routes::upload_voice).layer(DefaultBodyLimit::max(routes::MAX_VOICE_BODY_BYTES)),
+        )
+        .route("/api/voice/:id", delete(routes::delete_voice))
+        .route("/voice/:filename", get(routes::serve_voice))
+        .route("/api/review", get(routes::review))
+        .route(
+            "/api/letters",
+            get(routes::list_letters).post(routes::create_letter),
+        )
+        .route("/api/letters/:id", delete(routes::delete_letter))
+        .route(
+            "/api/letters/:id/voice",
+            post(routes::upload_letter_voice)
+                .layer(DefaultBodyLimit::max(routes::MAX_VOICE_BODY_BYTES)),
+        )
+        .route("/api/letter-voice/:id", delete(routes::delete_letter_voice))
+        .route("/letter-voice/:filename", get(routes::serve_letter_voice))
+        .route(
             "/api/photos/:id",
             delete(routes::delete_photo).put(routes::update_photo_caption),
         )

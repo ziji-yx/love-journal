@@ -19,6 +19,8 @@ use crate::{auth, error::AppError, models::*, AppState};
 pub const MAX_PHOTO_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_PHOTOS_PER_REQUEST: usize = 8;
 pub const MAX_UPLOAD_BODY_BYTES: usize = (MAX_PHOTO_BYTES + 1024 * 1024) * MAX_PHOTOS_PER_REQUEST;
+pub const MAX_VOICE_BYTES: usize = 20 * 1024 * 1024;
+pub const MAX_VOICE_BODY_BYTES: usize = MAX_VOICE_BYTES + 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct EntriesQuery {
@@ -132,6 +134,22 @@ fn detect_image(data: &[u8]) -> Option<(&'static str, &'static str)> {
         return Some(("webp", "image/webp"));
     }
     None
+}
+fn voice_extension(mime: &str) -> Option<&'static str> {
+    let mime = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match mime.as_str() {
+        "audio/webm" => Some("webm"),
+        "audio/ogg" => Some("ogg"),
+        "audio/mpeg" => Some("mp3"),
+        "audio/mp4" | "audio/x-m4a" => Some("m4a"),
+        "audio/wav" | "audio/x-wav" => Some("wav"),
+        _ => None,
+    }
 }
 
 fn is_safe_filename(filename: &str) -> bool {
@@ -345,10 +363,18 @@ pub async fn get_entry(
     .fetch_all(&state.db)
     .await?;
 
+    let voice_notes = sqlx::query_as::<_, VoiceNote>(
+        "SELECT * FROM voice_notes WHERE entry_id = ? ORDER BY created_at",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
     Ok(Json(EntryDetail {
         entry,
         photos,
         comments,
+        voice_notes,
     }))
 }
 
@@ -794,6 +820,413 @@ pub async fn delete_milestone(
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+pub async fn review(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ReviewResp>, AppError> {
+    auth::check(&state, &headers).await?;
+    let today = chrono::Local::now().date_naive();
+    let days_together = (today - state.love_start).num_days().max(0);
+    let entry_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries")
+        .fetch_one(&state.db)
+        .await?;
+    let photo_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM photos")
+        .fetch_one(&state.db)
+        .await?;
+    let comment_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM comments")
+        .fetch_one(&state.db)
+        .await?;
+    let voice_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM voice_notes")
+        .fetch_one(&state.db)
+        .await?;
+    let total_words: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(LENGTH(note)), 0) FROM entries")
+        .fetch_one(&state.db)
+        .await?;
+    let first_entry = sqlx::query_as::<_, Entry>("SELECT * FROM entries ORDER BY date, id LIMIT 1")
+        .fetch_optional(&state.db)
+        .await?;
+    let latest_entry =
+        sqlx::query_as::<_, Entry>("SELECT * FROM entries ORDER BY date DESC, id DESC LIMIT 1")
+            .fetch_optional(&state.db)
+            .await?;
+    let monthly = sqlx::query_as::<_, MonthlyReview>(
+        "SELECT substr(date, 1, 7) AS month, COUNT(*) AS count FROM entries GROUP BY month ORDER BY month",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let busiest_month = monthly
+        .iter()
+        .max_by_key(|item| item.count)
+        .map(|item| item.month.clone());
+    let recent_photos =
+        sqlx::query_as::<_, Photo>("SELECT * FROM photos ORDER BY created_at DESC LIMIT 8")
+            .fetch_all(&state.db)
+            .await?;
+
+    Ok(Json(ReviewResp {
+        days_together,
+        entry_count,
+        photo_count,
+        comment_count,
+        voice_count,
+        total_words,
+        first_entry,
+        latest_entry,
+        busiest_month,
+        monthly,
+        recent_photos,
+    }))
+}
+
+pub async fn list_letters(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<LetterResp>>, AppError> {
+    auth::check(&state, &headers).await?;
+    let rows = sqlx::query_as::<_, LetterRow>("SELECT * FROM letters ORDER BY open_at, id")
+        .fetch_all(&state.db)
+        .await?;
+    let voice_rows = sqlx::query_as::<_, LetterVoiceNote>(
+        "SELECT * FROM letter_voice_notes ORDER BY letter_id, created_at",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut voices_by_letter: HashMap<i64, Vec<LetterVoiceNote>> = HashMap::new();
+    for voice in voice_rows {
+        voices_by_letter
+            .entry(voice.letter_id)
+            .or_default()
+            .push(voice);
+    }
+    let today = chrono::Local::now().date_naive();
+    let letters = rows
+        .into_iter()
+        .map(|row| {
+            let open_date = parse_entry_date(&row.open_at).ok();
+            let unlocked = open_date.map(|date| date <= today).unwrap_or(false);
+            let days_until = open_date
+                .map(|date| (date - today).num_days().max(0))
+                .unwrap_or(0);
+            let voices = voices_by_letter.remove(&row.id).unwrap_or_default();
+            let voice_count = voices.len() as i64;
+            LetterResp {
+                id: row.id,
+                title: row.title,
+                author: row.author,
+                open_at: row.open_at,
+                created_at: row.created_at,
+                opened_at: row.opened_at,
+                unlocked,
+                days_until,
+                content: if unlocked { Some(row.content) } else { None },
+                voice_count,
+                voice_notes: if unlocked { voices } else { Vec::new() },
+            }
+        })
+        .collect();
+    Ok(Json(letters))
+}
+
+pub async fn create_letter(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateLetterReq>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+    ensure_text("标题", &req.title, 1, 80)?;
+    ensure_text("内容", &req.content, 1, 5000)?;
+    ensure_text("署名", &req.author, 1, 20)?;
+    parse_entry_date(&req.open_at).map_err(AppError::BadRequest)?;
+    let now = Utc::now().to_rfc3339();
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO letters (title, content, author, open_at, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
+    )
+    .bind(req.title.trim())
+    .bind(req.content.trim())
+    .bind(req.author.trim())
+    .bind(&req.open_at)
+    .bind(&now)
+    .fetch_one(&state.db)
+    .await?;
+    Ok(Json(serde_json::json!({ "id": id })))
+}
+
+pub async fn delete_letter(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+    let voices = sqlx::query_as::<_, LetterVoiceNote>(
+        "SELECT * FROM letter_voice_notes WHERE letter_id = ?",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+    let result = sqlx::query("DELETE FROM letters WHERE id = ?")
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound);
+    }
+    let paths: Vec<PathBuf> = voices
+        .iter()
+        .map(|voice| state.upload_dir.join(&voice.filename))
+        .collect();
+    remove_files(&paths).await;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn upload_voice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(entry_id): Path<i64>,
+    mut multipart: Multipart,
+) -> Result<Json<VoiceNote>, AppError> {
+    auth::check(&state, &headers).await?;
+    let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM entries WHERE id = ?")
+        .bind(entry_id)
+        .fetch_optional(&state.db)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+    let mut duration = 0.0;
+    let mut pending: Option<(Vec<u8>, String, String)> = None;
+    while let Some(field) = multipart.next_field().await? {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "duration" {
+            duration = field.text().await?.parse().unwrap_or(0.0);
+            continue;
+        }
+        if name != "audio" {
+            continue;
+        }
+        let mime = field.content_type().unwrap_or("").to_string();
+        let original_name = field
+            .file_name()
+            .unwrap_or("voice-note")
+            .chars()
+            .take(255)
+            .collect();
+        let data = field.bytes().await?.to_vec();
+        if data.is_empty() || data.len() > MAX_VOICE_BYTES {
+            return Err(AppError::BadRequest("语音文件不能超过 20 MB".into()));
+        }
+        if voice_extension(&mime).is_none() {
+            return Err(AppError::BadRequest("不支持这种语音格式".into()));
+        }
+        pending = Some((data, mime, original_name));
+    }
+    let Some((data, mime, original_name)) = pending else {
+        return Err(AppError::BadRequest("请选择要上传的语音".into()));
+    };
+    let ext = voice_extension(&mime).unwrap_or("webm");
+    let id = Uuid::new_v4().to_string();
+    let filename = format!("{id}.{ext}");
+    let path = state.upload_dir.join(&filename);
+    if let Err(error) = tokio::fs::write(&path, &data).await {
+        tracing::error!("failed to write voice note {:?}: {error}", path);
+        return Err(AppError::Internal("语音写入失败".into()));
+    }
+    let now = Utc::now().to_rfc3339();
+    let note: VoiceNote = sqlx::query_as(
+        "INSERT INTO voice_notes (id, entry_id, filename, original_name, mime, duration_seconds, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    )
+    .bind(&id)
+    .bind(entry_id)
+    .bind(&filename)
+    .bind(&original_name)
+    .bind(&mime)
+    .bind(duration)
+    .bind(&now)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        let _ = std::fs::remove_file(&path);
+        AppError::from(error)
+    })?;
+    Ok(Json(note))
+}
+
+pub async fn serve_voice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(filename): Path<String>,
+) -> Result<Response, AppError> {
+    auth::check(&state, &headers).await?;
+    if !is_safe_filename(&filename) {
+        return Err(AppError::BadRequest("无效的语音文件名".into()));
+    }
+    let note: VoiceNote = sqlx::query_as("SELECT * FROM voice_notes WHERE filename = ?")
+        .bind(&filename)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let path = state.upload_dir.join(&note.filename);
+    let data = tokio::fs::read(&path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let mime = HeaderValue::from_str(&note.mime)
+        .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
+    let mut response = Response::new(Body::from(Bytes::from(data)));
+    response.headers_mut().insert(CONTENT_TYPE, mime);
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=3600"),
+    );
+    Ok(response)
+}
+
+pub async fn delete_voice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+    let note: VoiceNote = sqlx::query_as("SELECT * FROM voice_notes WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    sqlx::query("DELETE FROM voice_notes WHERE id = ?")
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    let _ = tokio::fs::remove_file(state.upload_dir.join(&note.filename)).await;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+pub async fn upload_letter_voice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(letter_id): Path<i64>,
+    mut multipart: Multipart,
+) -> Result<Json<LetterVoiceNote>, AppError> {
+    auth::check(&state, &headers).await?;
+    let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM letters WHERE id = ?")
+        .bind(letter_id)
+        .fetch_optional(&state.db)
+        .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+    let mut duration = 0.0;
+    let mut pending: Option<(Vec<u8>, String, String)> = None;
+    while let Some(field) = multipart.next_field().await? {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "duration" {
+            duration = field.text().await?.parse().unwrap_or(0.0);
+            continue;
+        }
+        if name != "audio" {
+            continue;
+        }
+        let mime = field.content_type().unwrap_or("").to_string();
+        let original_name = field
+            .file_name()
+            .unwrap_or("letter-voice")
+            .chars()
+            .take(255)
+            .collect();
+        let data = field.bytes().await?.to_vec();
+        if data.is_empty() || data.len() > MAX_VOICE_BYTES {
+            return Err(AppError::BadRequest("语音文件不能超过 20 MB".into()));
+        }
+        if voice_extension(&mime).is_none() {
+            return Err(AppError::BadRequest("不支持这种语音格式".into()));
+        }
+        pending = Some((data, mime, original_name));
+    }
+    let Some((data, mime, original_name)) = pending else {
+        return Err(AppError::BadRequest("请选择要上传的语音".into()));
+    };
+    let ext = voice_extension(&mime).unwrap_or("webm");
+    let id = Uuid::new_v4().to_string();
+    let filename = format!("{id}.{ext}");
+    let path = state.upload_dir.join(&filename);
+    if let Err(error) = tokio::fs::write(&path, &data).await {
+        tracing::error!("failed to write letter voice note {:?}: {error}", path);
+        return Err(AppError::Internal("语音写入失败".into()));
+    }
+    let now = Utc::now().to_rfc3339();
+    let note: LetterVoiceNote = sqlx::query_as(
+        "INSERT INTO letter_voice_notes (id, letter_id, filename, original_name, mime, duration_seconds, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *",
+    )
+    .bind(&id)
+    .bind(letter_id)
+    .bind(&filename)
+    .bind(&original_name)
+    .bind(&mime)
+    .bind(duration)
+    .bind(&now)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        let _ = std::fs::remove_file(&path);
+        AppError::from(error)
+    })?;
+    Ok(Json(note))
+}
+
+pub async fn serve_letter_voice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(filename): Path<String>,
+) -> Result<Response, AppError> {
+    auth::check(&state, &headers).await?;
+    if !is_safe_filename(&filename) {
+        return Err(AppError::BadRequest("无效的语音文件名".into()));
+    }
+    let note: LetterVoiceNote =
+        sqlx::query_as("SELECT * FROM letter_voice_notes WHERE filename = ?")
+            .bind(&filename)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    let open_at: String = sqlx::query_scalar("SELECT open_at FROM letters WHERE id = ?")
+        .bind(note.letter_id)
+        .fetch_one(&state.db)
+        .await?;
+    let open_date = parse_entry_date(&open_at).map_err(AppError::BadRequest)?;
+    if open_date > chrono::Local::now().date_naive() {
+        return Err(AppError::NotFound);
+    }
+    let path = state.upload_dir.join(&note.filename);
+    let data = tokio::fs::read(&path)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let mime = HeaderValue::from_str(&note.mime)
+        .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
+    let mut response = Response::new(Body::from(Bytes::from(data)));
+    response.headers_mut().insert(CONTENT_TYPE, mime);
+    response.headers_mut().insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static("private, max-age=3600"),
+    );
+    Ok(response)
+}
+
+pub async fn delete_letter_voice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+    let note: LetterVoiceNote = sqlx::query_as("SELECT * FROM letter_voice_notes WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    sqlx::query("DELETE FROM letter_voice_notes WHERE id = ?")
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    let _ = tokio::fs::remove_file(state.upload_dir.join(&note.filename)).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 #[cfg(test)]

@@ -42,6 +42,50 @@ pub struct Milestone {
     pub repeat_yearly: i64,
     pub created_at: String,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct VoiceNote {
+    pub id: String,
+    pub entry_id: i64,
+    pub filename: String,
+    pub original_name: String,
+    pub mime: String,
+    pub duration_seconds: f64,
+    pub created_at: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct LetterVoiceNote {
+    pub id: String,
+    pub letter_id: i64,
+    pub filename: String,
+    pub original_name: String,
+    pub mime: String,
+    pub duration_seconds: f64,
+    pub created_at: String,
+}
+#[derive(Debug, Clone, FromRow)]
+pub struct LetterRow {
+    pub id: i64,
+    pub title: String,
+    pub content: String,
+    pub author: String,
+    pub open_at: String,
+    pub created_at: String,
+    pub opened_at: Option<String>,
+}
+#[derive(Debug, Serialize)]
+pub struct LetterResp {
+    pub id: i64,
+    pub title: String,
+    pub author: String,
+    pub open_at: String,
+    pub created_at: String,
+    pub opened_at: Option<String>,
+    pub unlocked: bool,
+    pub days_until: i64,
+    pub content: Option<String>,
+    pub voice_count: i64,
+    pub voice_notes: Vec<LetterVoiceNote>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct EntryWithPhotos {
@@ -56,6 +100,7 @@ pub struct EntryDetail {
     pub entry: Entry,
     pub photos: Vec<Photo>,
     pub comments: Vec<Comment>,
+    pub voice_notes: Vec<VoiceNote>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +152,13 @@ pub struct UpdateMilestoneReq {
     pub emoji: String,
     pub repeat_yearly: i64,
 }
+#[derive(Debug, Deserialize)]
+pub struct CreateLetterReq {
+    pub title: String,
+    pub content: String,
+    pub author: String,
+    pub open_at: String,
+}
 
 #[derive(Debug, Serialize)]
 pub struct StatsResp {
@@ -123,6 +175,25 @@ pub struct Anniversary {
     pub name: String,
     pub date: String,
     pub days_until: i64,
+}
+#[derive(Debug, Serialize, FromRow)]
+pub struct MonthlyReview {
+    pub month: String,
+    pub count: i64,
+}
+#[derive(Debug, Serialize)]
+pub struct ReviewResp {
+    pub days_together: i64,
+    pub entry_count: i64,
+    pub photo_count: i64,
+    pub comment_count: i64,
+    pub voice_count: i64,
+    pub total_words: i64,
+    pub first_entry: Option<Entry>,
+    pub latest_entry: Option<Entry>,
+    pub busiest_month: Option<String>,
+    pub monthly: Vec<MonthlyReview>,
+    pub recent_photos: Vec<Photo>,
 }
 
 pub fn parse_entry_date(value: &str) -> Result<NaiveDate, String> {
