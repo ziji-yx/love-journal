@@ -262,7 +262,7 @@ function render() {
   } else if (route === "/calendar") {
     renderCalendar().finally(updateLinks);
   } else if (route === "/milestones") {
-    renderMilestonesPage().finally(updateLinks);
+    window.renderMilestonesPage().finally(updateLinks);
   } else if (/^\/search(?:\/.*)?$/.test(route)) {
     const query = decodeURIComponent(route.slice("/search/".length) || "");
     searchInput.value = query;
@@ -358,8 +358,27 @@ function milestoneCard(milestone) {
     const recentHtml = latest.length
       ? latest.map((entry) => renderEntryCard(entry)).join("")
       : emptyState("还没有手账，从第一篇开始吧");
+    const now = new Date();
+    const greeting = now.getHours() < 11 ? "早上好" : now.getHours() < 18 ? "下午好" : "晚上好";
+    const dateLabel = new Intl.DateTimeFormat("zh-CN", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      weekday: "long",
+    }).format(now);
 
     view.innerHTML = `
+      <header class="dashboard-head">
+        <div>
+          <span class="eyebrow">OUR LITTLE JOURNAL</span>
+          <h1>${greeting}，今天也值得被记住</h1>
+          <div class="dashboard-date">${dateLabel}</div>
+        </div>
+        <div class="dashboard-actions">
+          <button id="random-entry-top" class="btn ghost sm" type="button">随机回忆</button>
+          <a class="btn primary sm" href="#/new">写下今天</a>
+        </div>
+      </header>
       <div class="home-grid">
         <div class="home-main">
           <section class="hero">
@@ -400,13 +419,14 @@ function milestoneCard(milestone) {
     `;
 
     document.querySelector("#random-entry").addEventListener("click", handleRandomEntry);
+    document.querySelector("#random-entry-top").addEventListener("click", handleRandomEntry);
   } catch (error) {
     view.innerHTML = emptyState(error.message || "加载失败");
   }
 }
 
-async function handleRandomEntry() {
-  const button = document.querySelector("#random-entry");
+async function handleRandomEntry(event) {
+  const button = event?.currentTarget || document.querySelector("#random-entry");
   if (!button) return;
   button.disabled = true;
   button.textContent = "正在寻找…";
@@ -1011,7 +1031,7 @@ view.addEventListener("click", (event) => {
 
   const milestoneDelete = event.target.closest("[data-milestone-delete]");
   if (milestoneDelete) {
-    handleMilestoneDeletePage(milestoneDelete.dataset.milestoneDelete);
+    window.handleMilestoneDeletePage(milestoneDelete.dataset.milestoneDelete);
     return;
   }
   const entryCard = event.target.closest("[data-entry-id]");
@@ -1153,6 +1173,8 @@ async function handleMilestoneDeletePage(id) {
     toast(error.message || "删除失败");
   }
 }
+  window.renderMilestonesPage = renderMilestonesPage;
+  window.handleMilestoneDeletePage = handleMilestoneDeletePage;
   const initialTheme = localStorage.getItem(THEME_KEY)
     || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   applyTheme(initialTheme);
@@ -1162,8 +1184,6 @@ async function handleMilestoneDeletePage(id) {
   }
   try {
     await api("/api/me");
-    window.renderMilestonesPage = renderMilestonesPage;
-    window.handleMilestoneDeletePage = handleMilestoneDeletePage;
     showApp();
   } catch {
     showLogin();

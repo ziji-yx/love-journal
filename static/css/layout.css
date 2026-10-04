@@ -1,0 +1,194 @@
+main {
+  width: min(1220px, 100%);
+  padding: 40px 32px 96px;
+}
+
+.topbar {
+  padding: 0;
+}
+
+.topbar-row {
+  width: min(1220px, 100%);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 16px 32px;
+}
+
+.topbar nav {
+  margin-left: 8px;
+  gap: 8px;
+}
+
+.topbar-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.topbar-search input {
+  width: 220px;
+}
+
+.home-grid {
+  gap: 30px;
+}
+
+.hero {
+  gap: 22px;
+  margin-bottom: 24px;
+}
+
+.card {
+  padding: 26px;
+  margin-bottom: 22px;
+}
+
+.stat-strip {
+  gap: 16px;
+  margin: 24px 0 10px;
+}
+
+.section-title {
+  margin: 32px 0 16px;
+}
+
+.entry-list {
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.entry {
+  gap: 18px;
+  padding: 22px;
+}
+
+.entry .thumb {
+  width: 92px;
+  height: 92px;
+}
+
+.entry .note {
+  margin-top: 8px;
+  line-height: 1.75;
+}
+
+.milestone-grid {
+  gap: 16px;
+}
+
+.milestone-card {
+  padding: 18px;
+}
+
+.login-wrap {
+  max-width: 1180px;
+  gap: 80px;
+  padding: 48px 32px;
+}
+
+.login-card {
+  padding: 48px 38px;
+}
+
+.detail-note {
+  line-height: 1.9;
+  margin-top: 20px;
+}
+
+.photos {
+  gap: 16px;
+}
+
+.comment-form {
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.form-grid {
+  gap: 18px;
+}
+
+.form-grid textarea {
+  min-height: 180px;
+}
+
+.form-actions {
+  margin-top: 16px;
+}
+
+@media (max-width: 1040px) {
+  .topbar-row {
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px 24px;
+  }
+
+  .topbar nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .topbar nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topbar-tools {
+    margin-left: auto;
+  }
+
+  .home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  main {
+    padding: 28px 18px 72px;
+  }
+
+  .topbar-row {
+    padding: 12px 18px;
+  }
+
+  .topbar-tools {
+    width: 100%;
+    order: 4;
+  }
+
+  .topbar-search {
+    flex: 1;
+  }
+
+  .topbar-search input {
+    width: 100%;
+  }
+
+  .card {
+    padding: 20px;
+    margin-bottom: 18px;
+  }
+
+  .entry {
+    padding: 18px;
+  }
+
+  .entry .thumb {
+    width: 72px;
+    height: 72px;
+  }
+
+  .login-wrap {
+    gap: 32px;
+    padding: 28px 18px;
+  }
+
+  .login-card {
+    padding: 36px 26px;
+  }
+}

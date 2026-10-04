@@ -10,13 +10,20 @@
     <title>我们的手账</title>
     <link rel="stylesheet" href="/css/style.css" />
     <link rel="stylesheet" href="/css/theme.css" />
+    <link rel="stylesheet" href="/css/layout.css" />
   </head>
   <body>
     <div id="login" class="login-wrap" hidden>
+      <section class="login-scene">
+        <span class="eyebrow">OUR LITTLE JOURNAL</span>
+        <h1>把我们的日子，慢慢收进一册</h1>
+        <p>有些瞬间不必惊天动地，只要被认真记住，就会成为后来反复翻阅的光。</p>
+        <div class="login-note">只属于我们两个人的地方</div>
+      </section>
       <form id="login-form" class="login-card">
         <div class="login-heart">♥</div>
         <h1>我们的手账</h1>
-        <p class="login-sub">这里是只属于我们两个人的角落</p>
+        <p class="login-sub">欢迎回来，继续写下今天</p>
         <input
           id="password"
           type="password"
@@ -31,6 +38,7 @@
 
     <div id="app" hidden>
       <header class="topbar">
+        <div class="topbar-row">
         <a class="brand" href="#/">♥ 我们的手账</a>
         <nav>
           <a href="#/">首页</a>
@@ -39,12 +47,15 @@
           <a href="#/milestones">纪念日</a>
           <a href="#/new" class="cta">写手账</a>
         </nav>
+        <div class="topbar-tools">
         <form id="search-form" class="topbar-search" role="search">
           <input id="search-input" type="search" placeholder="搜索手账" autocomplete="off" />
           <button class="btn ghost sm" type="submit">搜索</button>
         </form>
         <button id="logout" class="btn ghost sm" title="退出">退出</button>
         <button id="theme-toggle" class="icon-btn" type="button" title="切换主题" aria-label="切换主题">🌙</button>
+        </div>
+        </div>
       </header>
 
       <main id="view"></main>
@@ -56,6 +67,6 @@
       <img id="lightbox-img" alt="" />
     </div>
 
-    <script src="/js/app.js?v=20261003e"></script>
+    <script src="/js/app.js?v=20261003h"></script>
   </body>
 </html>
