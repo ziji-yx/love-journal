@@ -148,6 +148,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/letters/:id", delete(routes::delete_letter))
         .route(
+            "/api/letters/notifications",
+            get(routes::letter_notifications),
+        )
+        .route("/api/letters/:id/open", post(routes::open_letter))
+        .route(
             "/api/letters/:id/voice",
             post(routes::upload_letter_voice)
                 .layer(DefaultBodyLimit::max(routes::MAX_VOICE_BODY_BYTES)),

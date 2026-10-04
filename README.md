@@ -97,3 +97,29 @@ docker run --rm -v love-journal_journal_data:/data -v "$PWD/backup:/backup" alpi
 ```
 
 如果暂时没有服务器，也可以用 Cloudflare Tunnel 或 Tailscale 做私有访问；Docker 和 Caddy 方案适用于有域名和公网服务器的常规上线。
+
+## 虚拟机 + Cloudflare Tunnel
+
+适合没有公网 IP、也不方便在路由器上开放端口的虚拟机。服务器只主动向 Cloudflare 建立出站连接，80/443 不需要暴露，Caddy 也不需要启动。
+
+1. 在 Cloudflare 添加域名并托管 DNS，然后在 Zero Trust 控制台创建 Tunnel，复制 token。
+2. 在隧道的 Public Hostname 里添加 `love.example.com`，Service 填 `http://app:8080`。
+3. 在服务器上准备配置：
+
+```bash
+cp .env.production.example .env.production
+nano .env.production
+```
+
+至少修改 `APP_PASSWORD`、`LOVE_START` 和 `CLOUDFLARE_TUNNEL_TOKEN`。走 Cloudflare 的 HTTPS 时 `COOKIE_SECURE=true` 保持不变。
+
+如果之前用 Caddy 方案启动过，先执行 `docker compose down`（只停容器，不会删除 `journal_data` 数据卷）。
+4. 启动：
+
+```bash
+docker compose -f compose.tunnel.yaml --env-file .env.production up -d --build
+```
+
+5. 打开 `https://你的域名`。数据仍保存在 Docker 卷 `journal_data` 中，备份方式同上。
+
+安全上建议在 Cloudflare Zero Trust 里再给这个域名加一条 Access 策略（例如邮箱一次性验证码），形成双重保护。Cloudflare 免费版单请求上限 100MB，本项目一次最多 8 张 10MB 照片，约 88MB，可以正常上传；再大就需要压缩图片或升级套餐。

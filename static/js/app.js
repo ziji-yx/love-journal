@@ -175,6 +175,7 @@ function showApp() {
   loginView.hidden = true;
   appView.hidden = false;
   render();
+  window.checkLetterNotifications?.();
 }
 
 function toast(message, type = "error") {
@@ -1192,6 +1193,7 @@ async function handleMilestoneDeletePage(id) {
 }
   window.renderMilestonesPage = renderMilestonesPage;
   window.handleMilestoneDeletePage = handleMilestoneDeletePage;
+  window.setInterval(() => window.checkLetterNotifications?.(), 60000);
   const initialTheme = localStorage.getItem(THEME_KEY)
     || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   applyTheme(initialTheme);

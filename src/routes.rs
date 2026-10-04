@@ -864,6 +864,44 @@ pub async fn review(
         sqlx::query_as::<_, Photo>("SELECT * FROM photos ORDER BY created_at DESC LIMIT 8")
             .fetch_all(&state.db)
             .await?;
+    let today_text = today.format("%Y-%m-%d").to_string();
+    let letter_rows = sqlx::query_as::<_, LetterRow>(
+        "SELECT * FROM letters WHERE open_at <= ? ORDER BY open_at, id",
+    )
+    .bind(&today_text)
+    .fetch_all(&state.db)
+    .await?;
+    let letter_voice_rows = sqlx::query_as::<_, LetterVoiceNote>(
+        "SELECT * FROM letter_voice_notes ORDER BY letter_id, created_at",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut letter_voices: HashMap<i64, Vec<LetterVoiceNote>> = HashMap::new();
+    for voice in letter_voice_rows {
+        letter_voices
+            .entry(voice.letter_id)
+            .or_default()
+            .push(voice);
+    }
+    let unlocked_letters = letter_rows
+        .into_iter()
+        .map(|row| {
+            let voices = letter_voices.remove(&row.id).unwrap_or_default();
+            LetterResp {
+                id: row.id,
+                title: row.title,
+                author: row.author,
+                open_at: row.open_at,
+                created_at: row.created_at,
+                opened_at: row.opened_at,
+                unlocked: true,
+                days_until: 0,
+                content: Some(row.content),
+                voice_count: voices.len() as i64,
+                voice_notes: voices,
+            }
+        })
+        .collect();
 
     Ok(Json(ReviewResp {
         days_together,
@@ -877,6 +915,7 @@ pub async fn review(
         busiest_month,
         monthly,
         recent_photos,
+        unlocked_letters,
     }))
 }
 
@@ -1227,6 +1266,53 @@ pub async fn delete_letter_voice(
         .execute(&state.db)
         .await?;
     let _ = tokio::fs::remove_file(state.upload_dir.join(&note.filename)).await;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+pub async fn letter_notifications(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<LetterNotification>>, AppError> {
+    auth::check(&state, &headers).await?;
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    let notifications = sqlx::query_as::<_, LetterNotification>(
+        "SELECT id, title, open_at FROM letters WHERE open_at <= ? AND opened_at IS NULL ORDER BY open_at, id",
+    )
+    .bind(today)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(notifications))
+}
+
+pub async fn open_letter(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::check(&state, &headers).await?;
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    let result = sqlx::query(
+        "UPDATE letters SET opened_at = ? WHERE id = ? AND open_at <= ? AND opened_at IS NULL",
+    )
+    .bind(Utc::now().to_rfc3339())
+    .bind(id)
+    .bind(today)
+    .execute(&state.db)
+    .await?;
+    if result.rows_affected() == 0 {
+        let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM letters WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
+        if exists.is_none() {
+            return Err(AppError::NotFound);
+        }
+    }
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 #[cfg(test)]

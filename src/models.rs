@@ -86,6 +86,12 @@ pub struct LetterResp {
     pub voice_count: i64,
     pub voice_notes: Vec<LetterVoiceNote>,
 }
+#[derive(Debug, Serialize, FromRow)]
+pub struct LetterNotification {
+    pub id: i64,
+    pub title: String,
+    pub open_at: String,
+}
 
 #[derive(Debug, Serialize)]
 pub struct EntryWithPhotos {
@@ -194,6 +200,7 @@ pub struct ReviewResp {
     pub busiest_month: Option<String>,
     pub monthly: Vec<MonthlyReview>,
     pub recent_photos: Vec<Photo>,
+    pub unlocked_letters: Vec<LetterResp>,
 }
 
 pub fn parse_entry_date(value: &str) -> Result<NaiveDate, String> {

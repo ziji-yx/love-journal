@@ -9,6 +9,20 @@ function reviewPhoto(photo) {
   `;
 }
 
+function reviewLetterEcho(letter) {
+  const voices = letter.voice_notes?.length
+    ? `<div class="review-letter-voices">${letter.voice_notes.map((voice) => `<audio controls preload="metadata" src="/letter-voice/${encodeURIComponent(voice.filename)}"></audio>`).join("")}</div>`
+    : "";
+  return `
+    <article class="review-letter">
+      <span class="letter-label">${formatDate(letter.open_at)} · ${esc(letter.author)}</span>
+      <h3>${esc(letter.title)}</h3>
+      <p>${esc(letter.content || "")}</p>
+      ${voices}
+    </article>
+  `;
+}
+
 async function renderReviewPage() {
   view.innerHTML = '<div class="loading">正在把这一年的片段装订成册…</div>';
   try {
@@ -32,6 +46,9 @@ async function renderReviewPage() {
     const latest = data.latest_entry
       ? `<div class="review-quote"><span>最近一篇</span><p>${esc(data.latest_entry.note)}</p><small>${formatDate(data.latest_entry.date)}</small></div>`
       : "";
+    const letters = data.unlocked_letters?.length
+      ? data.unlocked_letters.map(reviewLetterEcho).join("")
+      : emptyState("这一年还没有解封的时间胶囊");
 
     view.innerHTML = `
       <section class="review-hero">
@@ -57,6 +74,10 @@ async function renderReviewPage() {
       <section class="card">
         <div class="section-title"><h2>照片装订线</h2><span class="result-count">${data.photo_count} 张回忆</span></div>
         <div class="review-photos">${photos}</div>
+      </section>
+      <section class="card review-letter-chapter">
+        <div class="section-title"><h2>时间胶囊回声</h2><span class="result-count">${data.unlocked_letters?.length || 0} 封已解封</span></div>
+        <div class="review-letters">${letters}</div>
       </section>
     `;
   } catch (error) {
@@ -275,6 +296,92 @@ function initVoiceSection(entryId, notes) {
   });
 }
 
+const LETTER_NOTIFIED_KEY = "love_journal_notified_letters";
+
+async function checkLetterNotifications() {
+  if (!localStorage.getItem("love_journal_token")) return;
+  try {
+    const due = await api("/api/letters/notifications");
+    updateLetterReminder(due);
+    notifyBrowser(due);
+  } catch {
+    // The global API handler already deals with expired sessions.
+  }
+}
+
+function updateLetterReminder(due) {
+  const reminder = document.querySelector("#letter-reminder");
+  const badge = document.querySelector("#letter-badge");
+  if (!reminder || !badge) return;
+  if (!due.length) {
+    reminder.hidden = true;
+    badge.hidden = true;
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = String(due.length);
+  const titles = due.map((item) => esc(item.title)).join("、");
+  reminder.hidden = false;
+  reminder.innerHTML = `
+    <div class="letter-reminder-icon">✦</div>
+    <div class="letter-reminder-copy">
+      <strong>时间胶囊到期了</strong>
+      <span>${due.length} 封信可以打开：${titles}</span>
+    </div>
+    <div class="letter-reminder-actions">
+      <button id="letter-enable-notify" class="btn ghost sm" type="button">开启浏览器提醒</button>
+      <button id="letter-open-due" class="btn primary sm" type="button">去查看</button>
+    </div>
+  `;
+
+  const notifyButton = document.querySelector("#letter-enable-notify");
+  if (!("Notification" in window) || Notification.permission === "granted") {
+    notifyButton.hidden = true;
+  } else if (Notification.permission === "denied") {
+    notifyButton.disabled = true;
+    notifyButton.textContent = "浏览器通知已关闭";
+  } else {
+    notifyButton.addEventListener("click", async () => {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        toast("浏览器提醒已开启", "success");
+        notifyButton.hidden = true;
+      }
+    });
+  }
+
+  document.querySelector("#letter-open-due").addEventListener("click", async () => {
+    try {
+      await Promise.all(due.map((letter) => api(`/api/letters/${letter.id}/open`, { method: "POST" })));
+      localStorage.setItem(LETTER_NOTIFIED_KEY, JSON.stringify([]));
+      reminder.hidden = true;
+      badge.hidden = true;
+      navigate("#/letters");
+    } catch (error) {
+      toast(error.message || "打开失败");
+    }
+  });
+}
+
+function notifyBrowser(due) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  let notified = [];
+  try { notified = JSON.parse(localStorage.getItem(LETTER_NOTIFIED_KEY) || "[]"); } catch { notified = []; }
+  const newItems = due.filter((item) => !notified.includes(item.id));
+  newItems.forEach((item) => {
+    const notification = new Notification("时间胶囊可以打开了", {
+      body: item.title,
+      tag: `letter-${item.id}`,
+    });
+    notification.onclick = () => {
+      window.focus();
+      navigate("#/letters");
+    };
+  });
+  localStorage.setItem(LETTER_NOTIFIED_KEY, JSON.stringify([...new Set([...notified, ...due.map((item) => item.id)])]));
+}
+
+window.checkLetterNotifications = checkLetterNotifications;
 window.renderReviewPage = renderReviewPage;
 function initLetterVoice(container) {
   const letterId = container.dataset.letterVoice;
