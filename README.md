@@ -1,6 +1,8 @@
 # 我们的手账
 
-一个只属于两个人的私密恋爱手账，适合用作纪念日礼物。后端使用 Rust + Axum + SQLite，前端是原生 HTML、CSS 和 JavaScript，不需要 Node.js 构建步骤。
+一个只属于两个人的私密恋爱手账，适合用作纪念日礼物。后端使用 Rust + Axum + SQLite，前端使用原生 HTML、CSS 和 JavaScript，不需要 Node.js 构建步骤。
+
+支持 Windows、macOS 和 Linux。Docker 部署是可选功能，本地运行不依赖 Docker。
 
 ## 功能
 
@@ -40,32 +42,122 @@ compose.tunnel.yaml  Docker + Cloudflare Tunnel 部署
 Caddyfile            Caddy 配置
 ```
 
+## 运行要求
+
+- Rust 1.98 或更高版本
+- 任意现代浏览器
+- 如果要使用麦克风录音，需要允许浏览器访问麦克风
+- Docker 仅在服务器部署时需要
+
+检查 Rust 是否安装：
+
+```bash
+rustc --version
+cargo --version
+```
+
+如果提示找不到命令，请先安装 Rust 工具链。
+
+推荐通过 <https://rustup.rs/> 安装 Rust。不同系统可能还需要基础编译工具：
+
+- Windows：安装 Rust MSVC 工具链和 Visual Studio C++ Build Tools。
+- macOS：运行 `xcode-select --install` 安装 Xcode Command Line Tools。
+- Linux：安装 `build-essential`、`pkg-config` 等基础构建工具，具体包名取决于发行版。
+
 ## 本地运行
 
-首次使用时准备配置：
+在项目根目录打开终端。
+
+### 1. 创建配置文件
+
+macOS / Linux：
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell：
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-编辑 `.env`，至少设置 `APP_PASSWORD` 和 `LOVE_START`，然后运行：
+也可以手动创建 `.env` 文件。
 
-```powershell
+### 2. 修改配置
+
+至少设置下面两项：
+
+```dotenv
+APP_PASSWORD=换成你们自己的口令
+LOVE_START=2025-10-02
+```
+
+默认配置如下：
+
+```dotenv
+HOST=127.0.0.1
+PORT=8080
+DATABASE_URL=sqlite://data/journal.db
+UPLOAD_DIR=data/uploads
+COOKIE_SECURE=false
+RUST_LOG=love_journal=info,tower_http=info
+```
+
+### 3. 启动开发版本
+
+所有系统都使用同一个 Cargo 命令：
+
+```bash
 cargo run
 ```
 
-浏览器打开：
+按 `Ctrl+C` 停止服务。
 
-<http://127.0.0.1:8080>
+### 4. 打开浏览器
 
-也可以先构建发布版本：
+默认访问地址：
+
+```text
+http://127.0.0.1:8080
+```
+
+这里的地址不是固定的，由 `.env` 中的 `HOST` 和 `PORT` 决定：
+
+- `HOST=127.0.0.1`：只有本机可以访问，本机使用 `http://127.0.0.1:端口`。
+- `HOST=0.0.0.0`：本机仍可用 `127.0.0.1`，其他设备使用这台电脑的局域网 IP 或公网 IP。
+- `PORT=9000`：访问地址变成 `http://127.0.0.1:9000`。
+- Docker + Caddy 或 Cloudflare Tunnel 部署时，外部访问的是域名，不是容器内部的 `8080`。
+
+## 构建发布版本
+
+所有系统都使用：
+
+```bash
+cargo build --release
+```
+
+构建完成后，发布文件的路径不同：
+
+macOS / Linux：
+
+```bash
+./target/release/love-journal
+```
+
+Windows PowerShell：
 
 ```powershell
-cargo build --release
 .\target\release\love-journal.exe
 ```
 
-程序会自动定位项目根目录，所以从项目根目录双击 exe 也可以正常读取 `static`、`.env` 和 `data`。
+Windows CMD：
+
+```bat
+target\release\love-journal.exe
+```
+
+程序会自动定位项目根目录，因此从项目根目录启动时可以正确读取 `static`、`.env` 和 `data`。
 
 ## 配置说明
 
@@ -102,12 +194,36 @@ data/uploads/        照片和声音文件
 
 ## 局域网使用
 
-如果要让同一 Wi-Fi 下的另一台设备访问：
+如果想让同一 Wi-Fi 下的手机或另一台电脑访问：
 
 1. 把 `.env` 中的 `HOST` 改成 `0.0.0.0`。
 2. 把 `APP_PASSWORD` 改成强口令。
-3. 在 Windows 防火墙放行 `8080` TCP 端口。
-4. 用本机局域网 IP 访问，例如 `http://192.168.1.20:8080`。
+3. 在操作系统防火墙中放行对应 TCP 端口，默认是 `8080`。
+4. 找到这台电脑的局域网 IP，在其他设备上访问：
+
+```text
+http://这台电脑的局域网IP:8080
+```
+
+查看局域网 IP 的方式：
+
+macOS：
+
+```bash
+ipconfig getifaddr en0
+```
+
+Linux：
+
+```bash
+hostname -I
+```
+
+Windows PowerShell：
+
+```powershell
+ipconfig
+```
 
 不要在没有强口令的情况下把服务直接暴露到公网。
 
@@ -117,14 +233,21 @@ data/uploads/        照片和声音文件
 
 1. 准备域名并添加 A 记录，指向服务器公网 IP。
 2. 云服务器安全组开放 `80`、`443`，不要向公网开放应用内部的 `8080`。
-3. 在服务器项目目录复制配置：
+3. 在服务器项目目录创建生产配置：
+
+macOS / Linux：
 
 ```bash
 cp .env.production.example .env.production
-nano .env.production
 ```
 
-至少修改：
+Windows PowerShell：
+
+```powershell
+Copy-Item .env.production.example .env.production
+```
+
+4. 编辑 `.env.production`，至少修改：
 
 ```dotenv
 DOMAIN=love.your-domain.com
@@ -133,13 +256,13 @@ LOVE_START=2025-10-02
 COOKIE_SECURE=true
 ```
 
-4. 启动：
+5. 启动：
 
 ```bash
 docker compose --env-file .env.production up -d --build
 ```
 
-5. 打开 `https://你的域名`。
+6. 打开 `https://你的域名`。
 
 数据保存在 Docker 卷 `journal_data` 中。备份示例：
 
@@ -147,18 +270,25 @@ docker compose --env-file .env.production up -d --build
 docker run --rm -v love-journal_journal_data:/data -v "$PWD/backup:/backup" alpine tar czf /backup/journal.tar.gz -C /data .
 ```
 
+Windows PowerShell 中 `$PWD` 也可以使用，若路径包含空格，请用引号包住挂载路径。
+
 ## Cloudflare Tunnel 部署
 
-适合没有公网 IP 或不想在路由器上开放端口的场景。服务器只主动向 Cloudflare 建立出站连接，不需要开放 80/443，也不需要启动 Caddy。
+适合没有公网 IP，或不想在路由器上开放端口的场景。服务器只主动向 Cloudflare 建立出站连接，不需要开放 80/443，也不需要启动 Caddy。
 
 1. 在 Cloudflare 中添加并托管域名。
 2. 在 Zero Trust 控制台创建 Tunnel，复制 token。
 3. 在 Public Hostname 中添加域名，Service 填 `http://app:8080`。
-4. 在服务器上配置：
+4. 创建生产配置：
 
 ```bash
 cp .env.production.example .env.production
-nano .env.production
+```
+
+Windows PowerShell 使用：
+
+```powershell
+Copy-Item .env.production.example .env.production
 ```
 
 至少修改 `APP_PASSWORD`、`LOVE_START` 和 `CLOUDFLARE_TUNNEL_TOKEN`，保持 `COOKIE_SECURE=true`。
@@ -183,12 +313,19 @@ docker compose -f compose.tunnel.yaml --env-file .env.production up -d --build
 
 ## 开发检查
 
-```powershell
+所有系统都可以使用：
+
+```bash
 cargo fmt --check
 cargo test
 cargo clippy --all-targets --all-features
-node --check static\js\app.js
-node --check static\js\features.js
+```
+
+如果本机安装了 Node.js，还可以检查前端脚本：
+
+```bash
+node --check static/js/app.js
+node --check static/js/features.js
 ```
 
 ## 安全说明
