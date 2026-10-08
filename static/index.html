@@ -7,41 +7,53 @@
       content="width=device-width,initial-scale=1,viewport-fit=cover"
     />
     <meta name="theme-color" content="#fff8f4" />
+    <meta name="description" content="只属于两个人的私密恋爱手账" />
     <title>我们的手账</title>
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/theme.css" />
-    <link rel="stylesheet" href="/css/layout.css" />
-    <link rel="stylesheet" href="/css/features.css" />
+    <link rel="stylesheet" href="/css/style.css?v=20261008c" />
+    <link rel="stylesheet" href="/css/theme.css?v=20261008c" />
+    <link rel="stylesheet" href="/css/layout.css?v=20261008c" />
+    <link rel="stylesheet" href="/css/features.css?v=20261008c" />
   </head>
   <body>
+    <div id="boot" class="boot-screen" role="status" aria-live="polite">正在打开手账…</div>
     <div id="login" class="login-wrap" hidden>
-      <section class="login-scene">
-        <span class="eyebrow">OUR LITTLE JOURNAL</span>
-        <h1>把我们的日子，慢慢收进一册</h1>
-        <p>有些瞬间不必惊天动地，只要被认真记住，就会成为后来反复翻阅的光。</p>
-        <div class="login-note">只属于我们两个人的地方</div>
+      <section class="login-panel" aria-labelledby="login-title">
+        <div class="login-story">
+          <div class="login-brand" aria-hidden="true">♥</div>
+          <p class="login-kicker">OUR LITTLE JOURNAL</p>
+          <h1>把日子<br />收进这一册</h1>
+          <p class="login-story-copy">普通的一天，也值得被认真保存。</p>
+          <div class="login-quote">
+            <span>OUR DAYS</span>
+            <strong>今天，也值得被记住</strong>
+          </div>
+        </div>
+        <div class="login-form-panel">
+          <p class="login-form-kicker">WELCOME BACK</p>
+          <h2 id="login-title">欢迎回来</h2>
+          <p class="login-copy">输入口令，继续翻阅你们的日常。</p>
+          <form id="login-form" class="login-form" autocomplete="on">
+            <label for="password">口令</label>
+            <input
+              id="password"
+              type="password"
+              placeholder="输入你们的专属口令"
+              autocomplete="current-password"
+              required
+            />
+            <button class="btn primary" type="submit">进入手账</button>
+            <p id="login-err" class="err" aria-live="polite"></p>
+          </form>
+          <p class="login-note">只属于你们两个人的手账</p>
+        </div>
       </section>
-      <form id="login-form" class="login-card">
-        <div class="login-heart">♥</div>
-        <h1>我们的手账</h1>
-        <p class="login-sub">欢迎回来，继续写下今天</p>
-        <input
-          id="password"
-          type="password"
-          placeholder="请输入口令"
-          autocomplete="current-password"
-          required
-        />
-        <button class="btn primary" type="submit">进入</button>
-        <p id="login-err" class="err"></p>
-      </form>
     </div>
 
     <div id="app" hidden>
       <header class="topbar">
         <div class="topbar-row">
         <a class="brand" href="#/">♥ 我们的手账</a>
-        <nav>
+        <nav aria-label="主导航">
           <a href="#/">首页</a>
           <a href="#/timeline">时间轴</a>
           <a href="#/calendar">日历</a>
@@ -71,7 +83,7 @@
       <img id="lightbox-img" alt="" />
     </div>
 
-    <script src="/js/features.js?v=20261004d"></script>
-    <script src="/js/app.js?v=20261004b"></script>
+    <script src="/js/features.js?v=20261008a"></script>
+    <script src="/js/app.js?v=20261008a"></script>
   </body>
 </html>

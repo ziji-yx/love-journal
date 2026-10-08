@@ -2,17 +2,51 @@ use crate::{error::AppError, AppState};
 use axum::http::{header::COOKIE, HeaderMap, HeaderValue};
 use chrono::Utc;
 use sha2::{Digest, Sha256};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 const SESSION_TTL_SECONDS: i64 = 30 * 24 * 60 * 60;
 const SESSION_COOKIE: &str = "love_journal_session";
+const MAX_LOGIN_FAILURES: u32 = 8;
+const LOGIN_BLOCK_SECONDS: u64 = 15 * 60;
+
+#[derive(Debug, Default)]
+pub struct LoginLimiter {
+    failed_attempts: u32,
+    blocked_until: Option<Instant>,
+}
+
+impl LoginLimiter {
+    pub fn blocked_seconds(&mut self) -> Option<u64> {
+        let blocked_until = self.blocked_until?;
+
+        let now = Instant::now();
+        if blocked_until > now {
+            return Some(blocked_until.duration_since(now).as_secs().max(1));
+        }
+
+        self.blocked_until = None;
+        self.failed_attempts = 0;
+        None
+    }
+
+    fn record_failure(&mut self) {
+        self.failed_attempts = self.failed_attempts.saturating_add(1);
+        if self.failed_attempts >= MAX_LOGIN_FAILURES {
+            self.blocked_until = Some(Instant::now() + Duration::from_secs(LOGIN_BLOCK_SECONDS));
+            self.failed_attempts = 0;
+        }
+    }
+
+    fn reset(&mut self) {
+        self.failed_attempts = 0;
+        self.blocked_until = None;
+    }
+}
 
 fn constant_time_eq(left: &str, right: &str) -> bool {
-    let left = left.as_bytes();
-    let right = right.as_bytes();
-    if left.len() != right.len() {
-        return false;
-    }
+    let left = Sha256::digest(left.as_bytes());
+    let right = Sha256::digest(right.as_bytes());
 
     let mut difference = 0u8;
     for (a, b) in left.iter().zip(right) {
@@ -34,9 +68,22 @@ async fn delete_expired(state: &AppState) -> Result<(), AppError> {
 }
 
 pub async fn login(state: &AppState, password: &str) -> Result<String, AppError> {
+    {
+        let mut limiter = state.login_limiter.lock().await;
+        if let Some(seconds) = limiter.blocked_seconds() {
+            let minutes = seconds.div_ceil(60);
+            return Err(AppError::TooManyRequests(format!(
+                "登录尝试过多，请在约 {minutes} 分钟后重试"
+            )));
+        }
+    }
+
     if !constant_time_eq(password, &state.password) {
+        state.login_limiter.lock().await.record_failure();
         return Err(AppError::Unauthorized);
     }
+
+    state.login_limiter.lock().await.reset();
 
     delete_expired(state).await?;
 
@@ -62,8 +109,10 @@ pub async fn logout(state: &AppState, headers: &HeaderMap) -> Result<(), AppErro
     Ok(())
 }
 
-pub async fn check(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    let token = extract_token(headers).ok_or(AppError::Unauthorized)?;
+pub async fn is_authenticated(state: &AppState, headers: &HeaderMap) -> Result<bool, AppError> {
+    let Some(token) = extract_token(headers) else {
+        return Ok(false);
+    };
     let token_hash = hash_token(&token);
     let expires_at: Option<i64> =
         sqlx::query_scalar("SELECT expires_at FROM sessions WHERE token_hash = ?")
@@ -72,15 +121,23 @@ pub async fn check(state: &AppState, headers: &HeaderMap) -> Result<(), AppError
             .await?;
 
     match expires_at {
-        Some(expires_at) if expires_at >= Utc::now().timestamp() => Ok(()),
+        Some(expires_at) if expires_at >= Utc::now().timestamp() => Ok(true),
         Some(_) => {
             sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
                 .bind(&token_hash)
                 .execute(&state.db)
                 .await?;
-            Err(AppError::Unauthorized)
+            Ok(false)
         }
-        None => Err(AppError::Unauthorized),
+        None => Ok(false),
+    }
+}
+
+pub async fn check(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    if is_authenticated(state, headers).await? {
+        Ok(())
+    } else {
+        Err(AppError::Unauthorized)
     }
 }
 
@@ -112,7 +169,9 @@ pub fn extract_token(headers: &HeaderMap) -> Option<String> {
 fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
     let cookies = headers.get(COOKIE)?.to_str().ok()?;
     for cookie in cookies.split(';') {
-        let (name, value) = cookie.trim().split_once('=')?;
+        let Some((name, value)) = cookie.trim().split_once('=') else {
+            continue;
+        };
         if name == SESSION_COOKIE && !value.is_empty() {
             return Some(value.to_string());
         }
@@ -140,5 +199,16 @@ mod tests {
             .to_str()
             .unwrap()
             .contains("Secure"));
+    }
+
+    #[test]
+    fn login_limiter_blocks_after_repeated_failures() {
+        let mut limiter = LoginLimiter::default();
+        for _ in 0..MAX_LOGIN_FAILURES {
+            limiter.record_failure();
+        }
+        assert!(limiter.blocked_seconds().is_some());
+        limiter.reset();
+        assert!(limiter.blocked_seconds().is_none());
     }
 }

@@ -74,6 +74,25 @@ body.no-scroll {
   overflow: hidden;
 }
 
+.boot-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent-2);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
 ::selection {
   background: var(--accent-soft);
   color: var(--accent-strong);
@@ -296,6 +315,7 @@ h3,
 }
 
 .topbar-search input {
+  min-width: 0;
   width: 160px;
   padding: 7px 12px;
   border: 1px solid var(--line);
@@ -306,6 +326,11 @@ h3,
   transition:
     border-color 0.16s ease,
     box-shadow 0.16s ease;
+}
+
+.topbar-search button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .topbar-search input:focus {
@@ -833,6 +858,7 @@ main {
 }
 
 .calendar .day {
+  position: relative;
   aspect-ratio: 1;
   border-radius: var(--radius-sm);
   display: grid;
@@ -864,6 +890,20 @@ main {
 .calendar .day.empty {
   border: none;
   background: transparent;
+}
+
+.calendar-count {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
 }
 
 .empty {
@@ -915,6 +955,10 @@ main {
 }
 
 @media (max-width: 640px) {
+  .comment-del,
+  .milestone-del {
+    opacity: 1;
+  }
   .hero {
     grid-template-columns: 1fr;
   }
@@ -953,5 +997,23 @@ main {
 
   .topbar-search input {
     width: 118px;
+  }
+}
+
+@media (hover: none) {
+  .comment-del,
+  .milestone-del {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

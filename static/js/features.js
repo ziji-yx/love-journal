@@ -1,5 +1,7 @@
 "use strict";
 
+const MAX_VOICE_BYTES = 20 * 1024 * 1024;
+
 function reviewPhoto(photo) {
   return `
     <figure class="review-photo">
@@ -144,7 +146,7 @@ async function renderLettersPage() {
     const cards = letters.length ? letters.map(letterCard).join("") : emptyState("还没有未来信，写下第一封吧");
     const today = new Date();
     today.setDate(today.getDate() + 365);
-    const defaultDate = today.toISOString().slice(0, 10);
+    const defaultDate = dateKey(today.getFullYear(), today.getMonth(), today.getDate());
     view.innerHTML = `
       <div class="section-title">
         <h2>未来信与时间胶囊</h2>
@@ -299,7 +301,8 @@ function initVoiceSection(entryId, notes) {
 const LETTER_NOTIFIED_KEY = "love_journal_notified_letters";
 
 async function checkLetterNotifications() {
-  if (!localStorage.getItem("love_journal_token")) return;
+  const app = document.querySelector("#app");
+  if (!app || app.hidden) return;
   try {
     const due = await api("/api/letters/notifications");
     updateLetterReminder(due);
@@ -412,6 +415,16 @@ function initLetterVoice(container) {
       const note = await api(`/api/letters/${letterId}/voice`, { method: "POST", body: formData });
       list.querySelector(".voice-empty")?.remove();
       list.insertAdjacentHTML("beforeend", letterVoiceTemplate(note));
+      const justAdded = list.querySelector(`[data-letter-voice-id="${note.id}"] [data-letter-voice-delete]`);
+      justAdded?.addEventListener("click", async () => {
+        if (!window.confirm("确定删除这段封存声音吗？")) return;
+        try {
+          await api(`/api/letter-voice/${encodeURIComponent(note.id)}`, { method: "DELETE" });
+          justAdded.closest(".voice-item").remove();
+        } catch (error) {
+          toast(error.message || "删除失败");
+        }
+      });
       toast("声音已经封存", "success");
     } catch (error) {
       toast(error.message || "上传失败");
@@ -448,11 +461,15 @@ function initLetterVoice(container) {
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files?.[0];
     if (!file) return;
+    if (file.size > MAX_VOICE_BYTES) {
+      toast("语音文件不能超过 20 MB");
+      fileInput.value = "";
+      return;
+    }
     await upload(file, file.name, 0);
     fileInput.value = "";
   });
 }
 
-window.renderReviewPage = renderReviewPage;
 window.renderLettersPage = renderLettersPage;
 window.initVoiceSection = initVoiceSection;

@@ -27,6 +27,7 @@ pub struct EntriesQuery {
     pub from: Option<String>,
     pub to: Option<String>,
     pub q: Option<String>,
+    pub limit: Option<i64>,
 }
 
 struct PendingPhoto {
@@ -49,23 +50,42 @@ fn ensure_text(field: &str, value: &str, min: usize, max: usize) -> Result<(), A
     Ok(())
 }
 
+fn parse_duration(raw: &str) -> Result<f64, AppError> {
+    let duration = raw
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| AppError::BadRequest("语音时长格式不正确".into()))?;
+    if !duration.is_finite() || !(0.0..=86_400.0).contains(&duration) {
+        return Err(AppError::BadRequest("语音时长应在 0 到 24 小时之间".into()));
+    }
+    Ok(duration)
+}
+
 fn validate_entry(req: &CreateEntryReq) -> Result<(), AppError> {
     parse_entry_date(&req.date).map_err(AppError::BadRequest)?;
-    ensure_text("内容", &req.note, 1, 10_000)?;
-    ensure_text("作者", &req.author, 1, 20)?;
+    ensure_text("内容", req.note.trim(), 1, 10_000)?;
+    ensure_text("作者", req.author.trim(), 1, 20)?;
     Ok(())
 }
 
 fn validate_update(req: &UpdateEntryReq) -> Result<(), AppError> {
     parse_entry_date(&req.date).map_err(AppError::BadRequest)?;
-    ensure_text("内容", &req.note, 1, 10_000)?;
-    ensure_text("作者", &req.author, 1, 20)?;
+    ensure_text("内容", req.note.trim(), 1, 10_000)?;
+    ensure_text("作者", req.author.trim(), 1, 20)?;
     Ok(())
 }
-fn validate_milestone(name: &str, date: &str, emoji: &str) -> Result<(), AppError> {
-    ensure_text("名称", name, 1, 40)?;
+fn validate_milestone(
+    name: &str,
+    date: &str,
+    emoji: &str,
+    repeat_yearly: i64,
+) -> Result<(), AppError> {
+    ensure_text("名称", name.trim(), 1, 40)?;
     parse_entry_date(date).map_err(AppError::BadRequest)?;
-    ensure_text("图标", emoji, 0, 16)?;
+    ensure_text("图标", emoji.trim(), 0, 16)?;
+    if !matches!(repeat_yearly, 0 | 1) {
+        return Err(AppError::BadRequest("每年重复参数只能为 0 或 1".into()));
+    }
     Ok(())
 }
 
@@ -87,6 +107,12 @@ fn validate_range(query: &EntriesQuery) -> Result<(), AppError> {
         if from > to {
             return Err(AppError::BadRequest("起始日期不能晚于结束日期".into()));
         }
+    }
+
+    if query.limit.is_some_and(|limit| !(1..=500).contains(&limit)) {
+        return Err(AppError::BadRequest(
+            "单次读取数量应在 1 到 500 之间".into(),
+        ));
     }
 
     Ok(())
@@ -135,21 +161,23 @@ fn detect_image(data: &[u8]) -> Option<(&'static str, &'static str)> {
     }
     None
 }
-fn voice_extension(mime: &str) -> Option<&'static str> {
-    let mime = mime
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    match mime.as_str() {
-        "audio/webm" => Some("webm"),
-        "audio/ogg" => Some("ogg"),
-        "audio/mpeg" => Some("mp3"),
-        "audio/mp4" | "audio/x-m4a" => Some("m4a"),
-        "audio/wav" | "audio/x-wav" => Some("wav"),
-        _ => None,
+fn detect_audio(data: &[u8]) -> Option<(&'static str, &'static str)> {
+    if data.starts_with(b"OggS") {
+        return Some(("ogg", "audio/ogg"));
     }
+    if data.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+        return Some(("webm", "audio/webm"));
+    }
+    if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WAVE" {
+        return Some(("wav", "audio/wav"));
+    }
+    if data.len() >= 12 && &data[4..8] == b"ftyp" {
+        return Some(("m4a", "audio/mp4"));
+    }
+    if data.starts_with(b"ID3") || data.first().is_some_and(|byte| byte & 0xe0 == 0xe0) {
+        return Some(("mp3", "audio/mpeg"));
+    }
+    None
 }
 
 fn is_safe_filename(filename: &str) -> bool {
@@ -200,8 +228,22 @@ pub async fn me(
     auth::check(&state, &headers).await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
-pub async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ok": true }))
+pub async fn session_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let authenticated = auth::is_authenticated(&state, &headers).await?;
+    Ok(Json(serde_json::json!({ "authenticated": authenticated })))
+}
+pub async fn health(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+    sqlx::query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(&state.db)
+        .await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn api_not_found() -> AppError {
+    AppError::NotFound
 }
 
 pub async fn stats(
@@ -213,15 +255,14 @@ pub async fn stats(
     let today = chrono::Local::now().date_naive();
     let days_together = (today - state.love_start).num_days().max(0);
 
-    let entry_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entries")
-        .fetch_one(&state.db)
-        .await?;
-    let photo_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM photos")
-        .fetch_one(&state.db)
-        .await?;
-    let comment_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM comments")
-        .fetch_one(&state.db)
-        .await?;
+    let (entry_count, photo_count, comment_count): (i64, i64, i64) = sqlx::query_as(
+        "SELECT
+            (SELECT COUNT(*) FROM entries),
+            (SELECT COUNT(*) FROM photos),
+            (SELECT COUNT(*) FROM comments)",
+    )
+    .fetch_one(&state.db)
+    .await?;
 
     Ok(Json(StatsResp {
         days_together,
@@ -293,6 +334,9 @@ pub async fn list_entries(
         sql.push_str(&conditions.join(" AND "));
     }
     sql.push_str(" ORDER BY date DESC, id DESC");
+    if query.limit.is_some() {
+        sql.push_str(" LIMIT ?");
+    }
 
     let mut db_query = sqlx::query_as::<_, Entry>(&sql);
     if let Some(from) = &query.from {
@@ -303,6 +347,9 @@ pub async fn list_entries(
     }
     if let Some(pattern) = &search_pattern {
         db_query = db_query.bind(pattern).bind(pattern).bind(pattern);
+    }
+    if let Some(limit) = query.limit {
+        db_query = db_query.bind(limit);
     }
 
     let entries = db_query.fetch_all(&state.db).await?;
@@ -393,8 +440,8 @@ pub async fn create_entry(
          RETURNING *",
     )
     .bind(&req.date)
-    .bind(&req.note)
-    .bind(&req.author)
+    .bind(req.note.trim())
+    .bind(req.author.trim())
     .bind(&now)
     .bind(&now)
     .fetch_one(&state.db)
@@ -420,8 +467,8 @@ pub async fn update_entry(
          WHERE id = ? AND version = ?",
     )
     .bind(&req.date)
-    .bind(&req.note)
-    .bind(&req.author)
+    .bind(req.note.trim())
+    .bind(req.author.trim())
     .bind(&now)
     .bind(id)
     .bind(req.version)
@@ -464,6 +511,12 @@ pub async fn delete_entry(
         .fetch_all(&state.db)
         .await?;
 
+    let voice_notes =
+        sqlx::query_as::<_, VoiceNote>("SELECT * FROM voice_notes WHERE entry_id = ?")
+            .bind(id)
+            .fetch_all(&state.db)
+            .await?;
+
     let mut transaction = state.db.begin().await?;
     let result = sqlx::query("DELETE FROM entries WHERE id = ?")
         .bind(id)
@@ -476,10 +529,15 @@ pub async fn delete_entry(
 
     transaction.commit().await?;
 
-    let paths: Vec<PathBuf> = photos
+    let mut paths: Vec<PathBuf> = photos
         .iter()
         .map(|photo| state.upload_dir.join(&photo.filename))
         .collect();
+    paths.extend(
+        voice_notes
+            .iter()
+            .map(|voice| state.upload_dir.join(&voice.filename)),
+    );
     remove_files(&paths).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -592,7 +650,11 @@ pub async fn upload_photos(
         }
     }
 
-    transaction.commit().await?;
+    if let Err(error) = transaction.commit().await {
+        remove_files(&written_paths).await;
+        return Err(error.into());
+    }
+
     Ok(Json(photos))
 }
 
@@ -623,10 +685,9 @@ pub async fn serve_upload(
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     let mut response = Response::new(Body::from(Bytes::from(data)));
     response.headers_mut().insert(CONTENT_TYPE, mime);
-    response.headers_mut().insert(
-        CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=3600"),
-    );
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(response)
 }
 
@@ -703,9 +764,9 @@ pub async fn create_comment(
     Json(req): Json<CreateCommentReq>,
 ) -> Result<Json<Comment>, AppError> {
     auth::check(&state, &headers).await?;
-    ensure_text("留言", &req.content, 1, 500)?;
-    ensure_text("名字", &req.author, 1, 20)?;
-    ensure_text("贴纸", &req.sticker, 0, 32)?;
+    ensure_text("留言", req.content.trim(), 1, 500)?;
+    ensure_text("名字", req.author.trim(), 1, 20)?;
+    ensure_text("贴纸", req.sticker.trim(), 0, 32)?;
 
     let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM entries WHERE id = ?")
         .bind(entry_id)
@@ -722,9 +783,9 @@ pub async fn create_comment(
          RETURNING *",
     )
     .bind(entry_id)
-    .bind(&req.author)
-    .bind(&req.content)
-    .bind(&req.sticker)
+    .bind(req.author.trim())
+    .bind(req.content.trim())
+    .bind(req.sticker.trim())
     .bind(&now)
     .fetch_one(&state.db)
     .await?;
@@ -767,7 +828,7 @@ pub async fn create_milestone(
     Json(req): Json<CreateMilestoneReq>,
 ) -> Result<Json<Milestone>, AppError> {
     auth::check(&state, &headers).await?;
-    validate_milestone(&req.name, &req.date, &req.emoji)?;
+    validate_milestone(&req.name, &req.date, &req.emoji, req.repeat_yearly)?;
     let now = Utc::now().to_rfc3339();
     let milestone: Milestone = sqlx::query_as(
         "INSERT INTO milestones (name, date, emoji, repeat_yearly, created_at)
@@ -791,7 +852,7 @@ pub async fn update_milestone(
     Json(req): Json<UpdateMilestoneReq>,
 ) -> Result<Json<Milestone>, AppError> {
     auth::check(&state, &headers).await?;
-    validate_milestone(&req.name, &req.date, &req.emoji)?;
+    validate_milestone(&req.name, &req.date, &req.emoji, req.repeat_yearly)?;
     let milestone: Milestone = sqlx::query_as(
         "UPDATE milestones SET name = ?, date = ?, emoji = ?, repeat_yearly = ?
          WHERE id = ? RETURNING *",
@@ -974,9 +1035,9 @@ pub async fn create_letter(
     Json(req): Json<CreateLetterReq>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     auth::check(&state, &headers).await?;
-    ensure_text("标题", &req.title, 1, 80)?;
-    ensure_text("内容", &req.content, 1, 5000)?;
-    ensure_text("署名", &req.author, 1, 20)?;
+    ensure_text("标题", req.title.trim(), 1, 80)?;
+    ensure_text("内容", req.content.trim(), 1, 5000)?;
+    ensure_text("署名", req.author.trim(), 1, 20)?;
     parse_entry_date(&req.open_at).map_err(AppError::BadRequest)?;
     let now = Utc::now().to_rfc3339();
     let id: i64 = sqlx::query_scalar(
@@ -1034,17 +1095,16 @@ pub async fn upload_voice(
         return Err(AppError::NotFound);
     }
     let mut duration = 0.0;
-    let mut pending: Option<(Vec<u8>, String, String)> = None;
+    let mut pending: Option<(Vec<u8>, String, String, &'static str)> = None;
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().unwrap_or("").to_string();
         if name == "duration" {
-            duration = field.text().await?.parse().unwrap_or(0.0);
+            duration = parse_duration(&field.text().await?)?;
             continue;
         }
         if name != "audio" {
             continue;
         }
-        let mime = field.content_type().unwrap_or("").to_string();
         let original_name = field
             .file_name()
             .unwrap_or("voice-note")
@@ -1055,15 +1115,15 @@ pub async fn upload_voice(
         if data.is_empty() || data.len() > MAX_VOICE_BYTES {
             return Err(AppError::BadRequest("语音文件不能超过 20 MB".into()));
         }
-        if voice_extension(&mime).is_none() {
+        let Some((extension, mime)) = detect_audio(&data) else {
             return Err(AppError::BadRequest("不支持这种语音格式".into()));
-        }
-        pending = Some((data, mime, original_name));
+        };
+        pending = Some((data, mime.to_string(), original_name, extension));
     }
-    let Some((data, mime, original_name)) = pending else {
+    let Some((data, mime, original_name, extension)) = pending else {
         return Err(AppError::BadRequest("请选择要上传的语音".into()));
     };
-    let ext = voice_extension(&mime).unwrap_or("webm");
+    let ext = extension;
     let id = Uuid::new_v4().to_string();
     let filename = format!("{id}.{ext}");
     let path = state.upload_dir.join(&filename);
@@ -1114,10 +1174,9 @@ pub async fn serve_voice(
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     let mut response = Response::new(Body::from(Bytes::from(data)));
     response.headers_mut().insert(CONTENT_TYPE, mime);
-    response.headers_mut().insert(
-        CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=3600"),
-    );
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(response)
 }
 
@@ -1154,17 +1213,16 @@ pub async fn upload_letter_voice(
         return Err(AppError::NotFound);
     }
     let mut duration = 0.0;
-    let mut pending: Option<(Vec<u8>, String, String)> = None;
+    let mut pending: Option<(Vec<u8>, String, String, &'static str)> = None;
     while let Some(field) = multipart.next_field().await? {
         let name = field.name().unwrap_or("").to_string();
         if name == "duration" {
-            duration = field.text().await?.parse().unwrap_or(0.0);
+            duration = parse_duration(&field.text().await?)?;
             continue;
         }
         if name != "audio" {
             continue;
         }
-        let mime = field.content_type().unwrap_or("").to_string();
         let original_name = field
             .file_name()
             .unwrap_or("letter-voice")
@@ -1175,15 +1233,15 @@ pub async fn upload_letter_voice(
         if data.is_empty() || data.len() > MAX_VOICE_BYTES {
             return Err(AppError::BadRequest("语音文件不能超过 20 MB".into()));
         }
-        if voice_extension(&mime).is_none() {
+        let Some((extension, mime)) = detect_audio(&data) else {
             return Err(AppError::BadRequest("不支持这种语音格式".into()));
-        }
-        pending = Some((data, mime, original_name));
+        };
+        pending = Some((data, mime.to_string(), original_name, extension));
     }
-    let Some((data, mime, original_name)) = pending else {
+    let Some((data, mime, original_name, extension)) = pending else {
         return Err(AppError::BadRequest("请选择要上传的语音".into()));
     };
-    let ext = voice_extension(&mime).unwrap_or("webm");
+    let ext = extension;
     let id = Uuid::new_v4().to_string();
     let filename = format!("{id}.{ext}");
     let path = state.upload_dir.join(&filename);
@@ -1243,10 +1301,9 @@ pub async fn serve_letter_voice(
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     let mut response = Response::new(Body::from(Bytes::from(data)));
     response.headers_mut().insert(CONTENT_TYPE, mime);
-    response.headers_mut().insert(
-        CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=3600"),
-    );
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(response)
 }
 
@@ -1330,6 +1387,27 @@ mod tests {
             Some(("png", "image/png"))
         );
         assert_eq!(detect_image(b"not-an-image"), None);
+    }
+
+    #[test]
+    fn detects_supported_audio_signatures() {
+        assert_eq!(detect_audio(b"OggS\0\0"), Some(("ogg", "audio/ogg")));
+        assert_eq!(
+            detect_audio(&[0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x00]),
+            Some(("webm", "audio/webm"))
+        );
+        assert_eq!(
+            detect_audio(b"RIFF\0\0\0\0WAVEfmt "),
+            Some(("wav", "audio/wav"))
+        );
+        assert_eq!(detect_audio(b"not-audio"), None);
+    }
+
+    #[test]
+    fn validates_voice_duration() {
+        assert_eq!(parse_duration("12.5").unwrap(), 12.5);
+        assert!(parse_duration("-1").is_err());
+        assert!(parse_duration("NaN").is_err());
     }
 
     #[test]

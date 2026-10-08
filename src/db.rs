@@ -1,4 +1,5 @@
 use sqlx::{
+    sqlite::SqliteSynchronous,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
     SqlitePool,
 };
@@ -9,6 +10,7 @@ pub async fn init(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         .create_if_missing(true)
         .foreign_keys(true)
         .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(5));
     tracing::info!("connecting to sqlite database");
 

@@ -230,6 +230,12 @@ h3,
     grid-template-columns: 1fr;
   }
 }
+
+@media (hover: none) {
+  .milestone-del {
+    opacity: 1;
+  }
+}
 .login-wrap {
   grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
   gap: 56px;

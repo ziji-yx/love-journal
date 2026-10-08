@@ -5,14 +5,20 @@ mod models;
 mod routes;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use axum::http::HeaderValue;
 use axum::{
     extract::DefaultBodyLimit,
-    http::header::{HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS},
-    routing::{delete, get, post, put},
+    http::header::{
+        HeaderName, CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+        X_FRAME_OPTIONS,
+    },
+    routing::{any, delete, get, post, put},
     Router,
 };
 use sqlx::SqlitePool;
+use tokio::sync::Mutex;
 use tower_http::{
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
@@ -27,6 +33,7 @@ pub struct AppState {
     pub love_start: chrono::NaiveDate,
     pub upload_dir: PathBuf,
     pub cookie_secure: bool,
+    pub login_limiter: Arc<Mutex<auth::LoginLimiter>>,
 }
 fn find_project_root() -> PathBuf {
     let mut dir = std::env::current_exe()
@@ -112,6 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         love_start,
         upload_dir: upload_dir.clone(),
         cookie_secure,
+        login_limiter: Arc::new(Mutex::new(auth::LoginLimiter::default())),
     };
 
     let app = Router::new()
@@ -119,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/login", post(routes::login))
         .route("/api/logout", post(routes::logout))
         .route("/api/me", get(routes::me))
+        .route("/api/session", get(routes::session_status))
         .route("/api/stats", get(routes::stats))
         .route("/api/random", get(routes::random_entry))
         .route(
@@ -177,10 +186,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/comments/:id", delete(routes::delete_comment))
         .route("/uploads/:filename", get(routes::serve_upload))
+        .route("/api", any(routes::api_not_found))
+        .route("/api/*path", any(routes::api_not_found))
         .fallback_service(ServeDir::new("static").fallback(ServeFile::new("static/index.html")))
         .layer(SetResponseHeaderLayer::overriding(
             X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+            ),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("camera=(), geolocation=(), microphone=(self)"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("cross-origin-opener-policy"),
+            HeaderValue::from_static("same-origin"),
         ))
         .layer(SetResponseHeaderLayer::overriding(
             X_FRAME_OPTIONS,

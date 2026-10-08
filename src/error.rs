@@ -7,6 +7,7 @@ use serde_json::json;
 
 #[derive(Debug)]
 pub enum AppError {
+    TooManyRequests(String),
     Unauthorized,
     NotFound,
     Conflict(String),
@@ -17,6 +18,7 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, msg) = match self {
+            AppError::TooManyRequests(m) => (StatusCode::TOO_MANY_REQUESTS, m),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "未登录或登录已过期".to_string()),
             AppError::NotFound => (StatusCode::NOT_FOUND, "资源不存在".to_string()),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m),
