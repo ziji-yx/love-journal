@@ -1030,11 +1030,22 @@ async function renderMilestonesPage() {
         <span class="result-count">${items.length} 个</span>
       </div>
       <form id="milestone-form" class="milestone-form card">
-        <input id="milestone-name" type="text" placeholder="例如：第一次见面" maxlength="40" required />
-        <input id="milestone-date" type="date" required />
-        <input id="milestone-emoji" type="text" placeholder="📅" maxlength="16" />
-        <label class="milestone-repeat"><input id="milestone-repeat" type="checkbox" checked /> 每年重复</label>
-        <button class="btn primary sm" type="submit">添加</button>
+        <div class="milestone-field milestone-field-name">
+          <label for="milestone-name">名称</label>
+          <input id="milestone-name" type="text" placeholder="第一次见面" maxlength="40" required />
+        </div>
+        <div class="milestone-field">
+          <label for="milestone-date">日期</label>
+          <input id="milestone-date" type="date" value="${todayInputValue()}" required />
+        </div>
+        <div class="milestone-field">
+          <label for="milestone-emoji">图标</label>
+          <input id="milestone-emoji" type="text" placeholder="♥" maxlength="16" />
+        </div>
+        <div class="milestone-form-actions">
+          <label class="milestone-repeat"><input id="milestone-repeat" type="checkbox" checked /> 每年重复</label>
+          <button class="btn primary sm" type="submit">添加</button>
+        </div>
       </form>
       <div class="milestone-grid">${items.length ? items.map(milestoneCard).join("") : emptyState("还没有纪念日，添加一个值得记住的日子吧")}</div>
     `;

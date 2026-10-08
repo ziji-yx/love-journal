@@ -340,6 +340,7 @@ node --check static/js/features.js
 - 时间胶囊的锁定逻辑在服务端执行，不是只靠前端隐藏。
 - 公网部署建议使用 HTTPS、Cloudflare Access 或 Tailscale 等额外访问控制。
 - 使用麦克风时必须由浏览器授权；如果不授权，可以改为上传音频文件。
+- 手机浏览器通常只在 HTTPS 页面允许录音。通过局域网 `http://电脑IP:8080` 访问时，可以直接使用“上传音频”，或通过 Tailscale、Cloudflare Tunnel 等方式使用 HTTPS。
 
 ## 产品定位
 

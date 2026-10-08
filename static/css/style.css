@@ -828,7 +828,7 @@ main {
 
 .calendar {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 7px;
 }
 
@@ -851,6 +851,7 @@ main {
 }
 
 .calendar .dow {
+  min-width: 0;
   text-align: center;
   font-size: 12px;
   color: var(--muted);
@@ -858,6 +859,8 @@ main {
 }
 
 .calendar .day {
+  min-width: 0;
+  width: 100%;
   position: relative;
   aspect-ratio: 1;
   border-radius: var(--radius-sm);

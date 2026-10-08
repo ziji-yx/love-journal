@@ -2,6 +2,35 @@
 
 const MAX_VOICE_BYTES = 20 * 1024 * 1024;
 
+function canRecordAudio() {
+  return Boolean(
+    window.isSecureContext
+      && navigator.mediaDevices?.getUserMedia
+      && window.MediaRecorder,
+  );
+}
+
+function recordingUnavailableMessage() {
+  if (!window.isSecureContext) {
+    return "手机浏览器需要 HTTPS 才能录音，可先使用“上传音频”";
+  }
+  return "当前浏览器不支持录音，可先使用“上传音频”";
+}
+
+function microphoneErrorMessage(error) {
+  if (!window.isSecureContext) return recordingUnavailableMessage();
+  if (error?.name === "NotAllowedError") return "麦克风权限未开启，请在浏览器设置中允许访问";
+  if (error?.name === "NotFoundError") return "没有检测到可用的麦克风，请改用“上传音频”";
+  return "无法访问麦克风，请检查浏览器权限或改用“上传音频”";
+}
+
+function prepareRecordButton(button) {
+  if (canRecordAudio()) return true;
+  button.textContent = "录音需 HTTPS";
+  button.title = recordingUnavailableMessage();
+  return false;
+}
+
 function reviewPhoto(photo) {
   return `
     <figure class="review-photo">
@@ -222,6 +251,7 @@ function initVoiceSection(entryId, notes) {
   const recordButton = document.querySelector("#voice-record");
   const fileInput = document.querySelector("#voice-file");
   if (!list || !recordButton || !fileInput) return;
+  prepareRecordButton(recordButton);
   let mediaRecorder = null;
   let chunks = [];
   let startedAt = 0;
@@ -268,6 +298,10 @@ function initVoiceSection(entryId, notes) {
       mediaRecorder.stop();
       return;
     }
+    if (!canRecordAudio()) {
+      toast(recordingUnavailableMessage());
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunks = [];
@@ -286,7 +320,7 @@ function initVoiceSection(entryId, notes) {
       recordButton.textContent = "停止录音";
       recordButton.classList.add("recording");
     } catch (error) {
-      toast("无法访问麦克风，请检查浏览器权限");
+      toast(microphoneErrorMessage(error));
     }
   });
 
@@ -391,6 +425,8 @@ function initLetterVoice(container) {
   const list = container.querySelector(".voice-list");
   const recordButton = container.querySelector("[data-letter-record]");
   const fileInput = container.querySelector("[data-letter-voice-file]");
+  if (!list || !recordButton || !fileInput) return;
+  prepareRecordButton(recordButton);
   let mediaRecorder = null;
   let chunks = [];
   let startedAt = 0;
@@ -436,6 +472,10 @@ function initLetterVoice(container) {
       mediaRecorder.stop();
       return;
     }
+    if (!canRecordAudio()) {
+      toast(recordingUnavailableMessage());
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunks = [];
@@ -453,8 +493,8 @@ function initLetterVoice(container) {
       mediaRecorder.start();
       recordButton.textContent = "停止录音";
       recordButton.classList.add("recording");
-    } catch {
-      toast("无法访问麦克风，请检查浏览器权限");
+    } catch (error) {
+      toast(microphoneErrorMessage(error));
     }
   });
 
